@@ -1,0 +1,23 @@
+# Python environment & cache
+venv/
+env/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+
+# IDEs & OS specific
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Large Model Checkpoints
+models/*.keras
+models/*.h5
+models/*.pkl
+models/*.joblib
+models/*.pt
