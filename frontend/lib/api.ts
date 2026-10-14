@@ -86,6 +86,13 @@ export const api = {
   report: (id: string) => request<Assessment>(`/api/reports/${encodeURIComponent(id)}`),
   submitAssessment: (body: FormData) =>
     request<Assessment>("/api/assessments", { method: "POST", body }),
+  predictVoiceFeatures: (featureColumns: string[], features: number[]) =>
+    request<Record<string, unknown>>("/api/research/predict-voice-features", {
+      method: "POST",
+      body: JSON.stringify({ feature_columns: featureColumns, features }),
+    }),
+  submitManualAssessment: (body: FormData) =>
+    request<Assessment>("/api/assessments/manual", { method: "POST", body }),
   specialists: (search: SpecialistSearch) => {
     const query = new URLSearchParams({
       location: search.location,

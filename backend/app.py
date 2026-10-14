@@ -347,7 +347,7 @@ def serialize_assessment(row: sqlite3.Row) -> Dict[str, object]:
         "consented_at": row["consented_at"],
         "duration_seconds": row["duration_seconds"],
         "files": json.loads(row["files_json"]),
-        "result": None,
+        "result": json.loads(row["result_json"]) if row["result_json"] else None,
     }
 
 
@@ -490,6 +490,101 @@ async def create_assessment(
                 duration_seconds,
                 json.dumps(files),
             ),
+        )
+        row = db.execute("SELECT * FROM assessments WHERE id = ?", (assessment_id,)).fetchone()
+    return serialize_assessment(row)
+
+
+@app.post("/api/assessments/manual", status_code=201)
+async def create_manual_assessment(
+    modality: str = Form(...),
+    consent: bool = Form(...),
+    feature_columns: str = Form(...),
+    features: str = Form(...),
+    gait: Optional[UploadFile] = File(None),
+    user: Dict[str, str] = Depends(current_user),
+) -> Dict[str, object]:
+    """Persist exact vocal features and explicitly fail closed for fusion."""
+    if not consent:
+        raise HTTPException(status_code=422, detail="Consent is required before uploading.")
+    if modality not in ("voice", "voice_gait"):
+        raise HTTPException(status_code=422, detail="Choose voice-only or voice and gait.")
+    try:
+        columns = json.loads(feature_columns)
+        values = json.loads(features)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="Voice features must be valid JSON.") from exc
+    if columns != list(VOICE_FEATURE_COLUMNS):
+        raise HTTPException(status_code=422, detail="Voice feature columns must match the documented 16-feature order.")
+    if not isinstance(values, list) or len(values) != len(VOICE_FEATURE_COLUMNS):
+        raise HTTPException(status_code=422, detail="Exactly 16 numeric voice features are required.")
+
+    prediction = None
+    unavailable_reason = None
+    try:
+        prediction = float(predict_voice_features(
+            [values], str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl")
+        )[0])
+    except ModelNotReadyError as exc:
+        unavailable_reason = f"Analysis unavailable: {exc} No prediction or score was produced."
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    gait_data = None
+    gait_rows = None
+    if modality == "voice_gait" and gait is None:
+        raise HTTPException(status_code=422, detail="A valid gait file is required for voice + gait.")
+    if gait is not None:
+        gait_name = (gait.filename or "").lower()
+        if Path(gait_name).suffix not in (".csv", ".txt"):
+            raise HTTPException(status_code=422, detail="Gait data must be a CSV or TXT file.")
+        gait_data = await read_upload(gait)
+        gait_rows = validate_gait(gait_data, gait_name)
+
+    assessment_id = str(uuid.uuid4())
+    user_dir = UPLOAD_DIR / user["id"]
+    user_dir.mkdir(parents=True, exist_ok=True)
+    files = [{
+        "kind": "voice_features",
+        "name": "manual-feature-form",
+        "bytes": len(json.dumps(values)),
+        "validated_rows": None,
+    }]
+    if gait is not None and gait_data is not None:
+        suffix = Path(gait.filename or "").suffix.lower()
+        (user_dir / f"{assessment_id}-gait{suffix}").write_bytes(gait_data)
+        files.append({
+            "kind": "gait",
+            "name": Path(gait.filename or f"gait{suffix}").name,
+            "bytes": len(gait_data),
+            "validated_rows": gait_rows,
+        })
+
+    fusion_reason = (
+        "Fusion inference is unavailable: portal gait uploads are validated as CSV/TXT "
+        "numeric rows but not as the research model's required 200x19 window. "
+        "The vocal features and gait upload were saved, but no fusion prediction or score was produced."
+    )
+    completed = modality == "voice" and prediction is not None
+    reason = None if completed else (fusion_reason if modality == "voice_gait" else unavailable_reason)
+    result = None if not completed else {
+        "summary": "Exploratory research estimate from the submitted 16-feature vocal contract; not a diagnosis or clinical assessment.",
+        "model": "random-forest-updrs-v1",
+        "target": "motor_UPDRS",
+        "prediction": prediction,
+        "is_diagnostic": False,
+        "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
+    }
+    created_at = utc_now().isoformat()
+    with connect() as db:
+        db.execute(
+            """INSERT INTO assessments
+               (id, user_id, modality, status, unavailable_reason, created_at, consent_version,
+                consented_at, duration_seconds, files_json, result_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (assessment_id, user["id"], modality, "completed" if completed else "unavailable",
+             reason, created_at, "v1", created_at, 0, json.dumps(files),
+             json.dumps(result) if result else None),
         )
         row = db.execute("SELECT * FROM assessments WHERE id = ?", (assessment_id,)).fetchone()
     return serialize_assessment(row)

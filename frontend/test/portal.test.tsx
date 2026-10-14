@@ -110,9 +110,16 @@ describe("assessment validation and submission", () => {
     expect(previewGaitText("not,a,sensor,file", "gait.csv").error).toContain("numeric");
   });
 
-  it("records, validates, and waits for the API before rendering an assessment result", async () => {
+  it("validates the exact 16-feature form and waits for the API before rendering an assessment result", async () => {
     const user = userEvent.setup();
-    const submit = vi.spyOn(api, "submitAssessment");
+    const predict = vi.spyOn(api, "predictVoiceFeatures").mockResolvedValue({
+      model: "random-forest-updrs-v1",
+      target: "motor_UPDRS",
+      prediction: 1,
+      is_diagnostic: false,
+      notice: "Research output only",
+    });
+    const submit = vi.spyOn(api, "submitManualAssessment");
     const modelStatus = vi.spyOn(api, "modelAvailability").mockResolvedValue({
       voice: {
         artifact_available: true,
@@ -128,48 +135,30 @@ describe("assessment validation and submission", () => {
     });
     let finishRequest: ((value: Assessment) => void) | undefined;
     submit.mockReturnValue(new Promise((resolve) => { finishRequest = resolve; }));
-    const stopTrack = vi.fn();
-    Object.defineProperty(navigator, "mediaDevices", {
-      configurable: true,
-      value: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [{ stop: stopTrack }] }) },
-    });
-    class FakeMediaRecorder {
-      static isTypeSupported() { return true; }
-      mimeType = "audio/webm;codecs=opus";
-      ondataavailable: ((event: BlobEvent) => void) | null = null;
-      onstop: (() => void) | null = null;
-      start() {}
-      stop() {
-        this.ondataavailable?.({ data: new Blob(["voice bytes"]) } as BlobEvent);
-        this.onstop?.();
-      }
-    }
-    vi.stubGlobal("MediaRecorder", FakeMediaRecorder);
-    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:recording") });
-    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
-    let clock = 1000;
-    vi.spyOn(Date, "now").mockImplementation(() => clock);
     render(<AssessmentWizard />);
-    expect(await screen.findByText(/available for precomputed 16-feature input only/)).toBeInTheDocument();
+    expect(await screen.findByText(/exact 16-feature input/)).toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Submit assessment" });
     expect(button).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "Your assessment record was saved" })).not.toBeInTheDocument();
     await user.click(screen.getByLabelText(/I understand this is not a diagnosis/));
     expect(button).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Start recording" }));
-    expect(await screen.findByText("Recording")).toBeInTheDocument();
-    clock = 5000;
-    await user.click(screen.getByRole("button", { name: "Stop recording" }));
+    for (const column of [
+      "Jitter(%)", "Jitter(Abs)", "Jitter:RAP", "Jitter:PPQ5", "Jitter:DDP",
+      "Shimmer", "Shimmer(dB)", "Shimmer:APQ3", "Shimmer:APQ5", "Shimmer:APQ11",
+      "Shimmer:DDA", "NHR", "HNR", "RPDE", "DFA", "PPE",
+    ]) await user.type(screen.getByLabelText(column), "1");
     await waitFor(() => expect(button).toBeEnabled());
     await user.click(button);
+    expect(predict).toHaveBeenCalledTimes(1);
     expect(submit).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole("button", { name: "Uploading securely…" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Submitting securely…" })).toBeInTheDocument();
     expect(screen.queryByText(/Your assessment record was saved/)).not.toBeInTheDocument();
     expect(finishRequest).toBeTypeOf("function");
     await act(async () => { finishRequest?.(validationRequired); });
     expect(await screen.findByText("Your assessment record was saved")).toBeInTheDocument();
-    expect(screen.getByText("Feature validation required")).toBeInTheDocument();
-    expect(screen.getByText(/no prediction or score was generated/i)).toBeInTheDocument();
+    expect(screen.getByText("Analysis unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/no score was produced/i)).toBeInTheDocument();
+    predict.mockRestore();
     submit.mockRestore();
     modelStatus.mockRestore();
   });

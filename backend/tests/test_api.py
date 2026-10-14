@@ -1,3 +1,4 @@
+import json
 import joblib
 import numpy as np
 import pytest
@@ -71,7 +72,7 @@ def test_registration_login_and_expired_or_missing_session(client):
         "/api/auth/register", json={"email": "person@example.org", "password": "another-password"}
     ).status_code == 409
     with api.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         indexes = {
             row["name"]
             for row in db.execute("PRAGMA index_list('assessments')").fetchall()
@@ -185,6 +186,27 @@ def test_assessment_is_persisted_without_fabricated_result(client):
         "report_count": 0,
         "recent_assessments": [],
     }
+
+
+def test_manual_voice_features_persist_exploratory_report(client, tmp_path):
+    token = create_account(client)
+    write_voice_artifact(tmp_path / "models")
+    response = client.post(
+        "/api/assessments/manual",
+        headers=auth(token),
+        data={
+            "consent": "true",
+            "modality": "voice",
+            "feature_columns": json.dumps(list(VOICE_FEATURE_COLUMNS)),
+            "features": json.dumps([0.0] * 16),
+        },
+    )
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["status"] == "completed"
+    assert record["result"]["is_diagnostic"] is False
+    assert "Exploratory research estimate" in record["result"]["summary"]
+    assert client.get(f"/api/reports/{record['id']}", headers=auth(token)).json() == record
 
 
 def test_fusion_requires_gait_and_rejects_bad_duration_or_audio(client):
