@@ -1,4 +1,6 @@
 import json
+import io
+import wave
 import joblib
 import numpy as np
 import pytest
@@ -34,6 +36,19 @@ def auth(token):
 
 def voice_file():
     return ("voice.webm", b"\x1aE\xdf\xa3sample-audio", "audio/webm")
+
+
+def wav_voice_file():
+    sample_rate = 16_000
+    time = np.arange(sample_rate * 5) / sample_rate
+    samples = (0.2 * np.sin(2 * np.pi * 180 * time) * 32767).astype("<i2")
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(samples.tobytes())
+    return ("voice.wav", output.getvalue(), "audio/wav")
 
 
 def write_voice_artifact(directory):
@@ -72,7 +87,7 @@ def test_registration_login_and_expired_or_missing_session(client):
         "/api/auth/register", json={"email": "person@example.org", "password": "another-password"}
     ).status_code == 409
     with api.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
         indexes = {
             row["name"]
             for row in db.execute("PRAGMA index_list('assessments')").fetchall()
@@ -90,7 +105,7 @@ def test_model_status_and_precomputed_inference_are_separate_from_audio_uploads(
     assert missing["voice"] == {
         "artifact_available": False,
         "precomputed_features_supported": True,
-        "raw_audio_inference_available": False,
+        "raw_audio_inference_available": True,
         "reason": "Voice model artifact is unavailable.",
     }
     assert client.post(
@@ -105,7 +120,7 @@ def test_model_status_and_precomputed_inference_are_separate_from_audio_uploads(
     features = write_voice_artifact(tmp_path / "models")
     status = client.get("/api/models/status").json()
     assert status["voice"]["artifact_available"] is True
-    assert status["voice"]["raw_audio_inference_available"] is False
+    assert status["voice"]["raw_audio_inference_available"] is True
     prediction = client.post(
         "/api/research/predict-voice-features",
         headers=auth(token),
@@ -186,6 +201,24 @@ def test_assessment_is_persisted_without_fabricated_result(client):
         "report_count": 0,
         "recent_assessments": [],
     }
+
+
+def test_voice_wav_extracts_persists_features_and_report(client, tmp_path):
+    token = create_account(client)
+    write_voice_artifact(tmp_path / "models")
+    response = client.post(
+        "/api/assessments",
+        headers=auth(token),
+        data={"consent": "true", "modality": "voice", "duration_seconds": "5"},
+        files={"voice": wav_voice_file()},
+    )
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["status"] == "completed"
+    assert list(record["extracted_features"]) == list(VOICE_FEATURE_COLUMNS)
+    assert record["extraction_version"] == "audio-extractor-v1"
+    assert record["quality"]["quality_status"] == "validated"
+    assert record["result"]["is_diagnostic"] is False
 
 
 def test_manual_voice_features_persist_exploratory_report(client, tmp_path):

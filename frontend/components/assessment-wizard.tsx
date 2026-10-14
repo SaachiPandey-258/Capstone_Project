@@ -19,6 +19,8 @@ export function AssessmentWizard() {
   const [modality, setModality] = useState<"voice" | "voice_gait">("voice");
   const [values, setValues] = useState<string[]>(() => VOICE_FEATURE_COLUMNS.map(() => ""));
   const [gait, setGait] = useState<File | null>(null);
+  const [voice, setVoice] = useState<File | null>(null);
+  const [durationSeconds, setDurationSeconds] = useState("5");
   const [gaitPreview, setGaitPreview] = useState<string[][]>([]);
   const [gaitError, setGaitError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -42,7 +44,9 @@ export function AssessmentWizard() {
 
   const numericValues = values.map(Number);
   const validFeatures = values.every((value) => value.trim() !== "" && Number.isFinite(Number(value)));
-  const canSubmit = consent && validFeatures && !gaitError && (modality === "voice" || gait !== null) && !submitting;
+  const canSubmit = consent && !gaitError && (modality === "voice" || gait !== null) &&
+    (voice !== null || validFeatures) && Number(durationSeconds) >= 3 &&
+    Number(durationSeconds) <= 60 && !submitting;
 
   async function submit() {
     if (!canSubmit) return;
@@ -51,6 +55,15 @@ export function AssessmentWizard() {
     const form = new FormData();
     form.append("consent", "true");
     form.append("modality", modality);
+    if (voice) {
+      form.append("duration_seconds", durationSeconds);
+      form.append("voice", voice, voice.name);
+      if (gait) form.append("gait", gait, gait.name);
+      try { setResult(await api.submitAssessment(form)); }
+      catch (caught) { setSubmitError(caught instanceof ApiError ? caught.message : "The assessment could not be submitted."); }
+      finally { setSubmitting(false); }
+      return;
+    }
     form.append("feature_columns", JSON.stringify(VOICE_FEATURE_COLUMNS));
     form.append("features", JSON.stringify(numericValues));
     if (gait) form.append("gait", gait, gait.name);
@@ -95,8 +108,12 @@ export function AssessmentWizard() {
       </div>
     </section>
     <section className="wizard-card">
-      <div className="wizard-step"><span>03</span><div><h2>Enter vocal features</h2><p>Enter one numeric value for every field, in the documented order used by scripts/feature_contract.py. Do not guess values from a recording.</p></div></div>
+      <div className="wizard-step"><span>03</span><div><h2>Provide voice input</h2><p>Upload a 3–60 second supported recording for automatic extraction, or enter the exact 16-feature contract manually. Audio extraction remains research-only and fails closed on quality or dependency problems.</p></div></div>
+      <label className="file-picker">Choose voice recording<input type="file" accept=".webm,.wav,.ogg,.mp3,.m4a,audio/*" onChange={(event) => setVoice(event.target.files?.[0] || null)} /></label>
+      {voice && <><p className="file-selected">{voice.name} · {(voice.size / 1024).toFixed(1)} KB</p><label>Recording duration (seconds)<input type="number" min="3" max="60" step="0.1" value={durationSeconds} onChange={(event) => setDurationSeconds(event.target.value)} /></label></>}
+      {!voice && <><p className="field-hint">No recording selected. Manual precomputed features remain supported for reproducible research inputs.</p>
       <div className="feature-grid">{VOICE_FEATURE_COLUMNS.map((column, index) => <label key={column}>{column}<input aria-label={column} type="number" step="any" value={values[index]} onChange={(event) => setValues((current) => current.map((value, item) => item === index ? event.target.value : value))} /></label>)}</div>
+      </>}
     </section>
     {modality === "voice_gait" && <section className="wizard-card">
       <div className="wizard-step"><span>04</span><div><h2>Select gait data</h2><p>Upload numeric CSV or tab-delimited TXT data. The file is validated and saved, but no fusion score is generated.</p></div></div>
@@ -107,7 +124,7 @@ export function AssessmentWizard() {
     </section>}
     <section className="submission-panel"><div><strong>Analysis availability</strong><p>{availability?.voice.artifact_available ? "The local research voice artifact is available for this exact 16-feature input." : "A compatible local voice artifact is not currently available; your submission will be saved as unavailable without a score."} {modality === "voice_gait" && "Fusion inference is explicitly unavailable until validated 200x19 preprocessing and artifacts are supported."}</p></div>
       {submitError && <ErrorMessage>{submitError}</ErrorMessage>}<button className="button" type="button" onClick={() => void submit()} disabled={!canSubmit}>{submitting ? "Submitting securely…" : "Submit assessment"}</button>
-      {!canSubmit && !submitting && <span className="field-hint">Consent, all 16 finite numeric values{modality === "voice_gait" ? ", and a valid gait file" : ""} are required.</span>}
+      {!canSubmit && !submitting && <span className="field-hint">Consent, a supported 3–60 second recording or all 16 finite numeric values{modality === "voice_gait" ? ", and a valid gait file" : ""} are required.</span>}
     </section>
   </div>;
 }

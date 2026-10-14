@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from google.auth.exceptions import GoogleAuthError
 from pydantic import BaseModel, EmailStr, Field
 
+from .audio_features import AudioExtractionError, extract_audio_features
 from scripts.feature_contract import VOICE_FEATURE_COLUMNS
 from scripts.inference import ModelNotReadyError, load_voice_model, predict_voice_features
 from .specialists import SpecialistServiceError, search_specialists
@@ -176,7 +177,7 @@ def model_status() -> Dict[str, object]:
         "voice": {
             "artifact_available": voice_available,
             "precomputed_features_supported": True,
-            "raw_audio_inference_available": False,
+            "raw_audio_inference_available": True,
             "reason": voice_reason,
         },
         "fusion": {
@@ -347,6 +348,12 @@ def serialize_assessment(row: sqlite3.Row) -> Dict[str, object]:
         "consented_at": row["consented_at"],
         "duration_seconds": row["duration_seconds"],
         "files": json.loads(row["files_json"]),
+        "extracted_features": (
+            json.loads(row["extracted_features_json"])
+            if row["extracted_features_json"] else None
+        ),
+        "extraction_version": row["extraction_version"],
+        "quality": json.loads(row["quality_json"]) if row["quality_json"] else None,
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
     }
 
@@ -465,30 +472,73 @@ async def create_assessment(
             }
         )
 
-    reason = (
-        "Feature validation required: raw browser audio cannot currently be mapped to "
-        "the complete 16-feature training schema. RPDE, DFA, and PPE have no validated "
-        "audio extractor or reference fixtures. The upload is saved, but no scaler or "
-        "model inference was run and no prediction or score was produced."
-    )
+    extracted = None
+    extraction_version = None
+    quality = None
+    prediction = None
+    reason = None
+    result = None
+    if modality != "voice":
+        reason = (
+            "Validation required: voice + gait fusion is unavailable because uploaded "
+            "gait rows are not validated as the model's fixed 200x19 input. No score was produced."
+        )
+    else:
+        try:
+            extraction = extract_audio_features(
+                voice_data, Path(voice_name).suffix, duration_hint=duration_seconds
+            )
+            prediction = float(predict_voice_features(
+                [list(extraction.features[column] for column in VOICE_FEATURE_COLUMNS)],
+                str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl"),
+            )[0])
+            extracted = extraction.features
+            extraction_version = extraction.version
+            quality = extraction.quality
+            result = {
+                "summary": "Exploratory research estimate from extracted acoustic features; not a diagnosis or clinical assessment.",
+                "model": "random-forest-updrs-v1",
+                "target": "motor_UPDRS",
+                "prediction": prediction,
+                "is_diagnostic": False,
+                "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
+            }
+        except AudioExtractionError as exc:
+            reason = f"Feature validation required: {exc} No prediction or score was produced."
+            quality = {"quality_status": "validation_required", "reason": str(exc)}
+        except ModelNotReadyError as exc:
+            reason = f"Analysis unavailable: {exc} No prediction or score was produced."
+            quality = {"quality_status": "artifact_unavailable", "reason": str(exc)}
+        except (TypeError, ValueError, RuntimeError) as exc:
+            reason = f"Analysis unavailable: feature or model validation failed ({exc}). No prediction or score was produced."
+            quality = {"quality_status": "validation_required", "reason": str(exc)}
+    completed = result is not None
     created_at = utc_now().isoformat()
     with connect() as db:
         db.execute(
             """INSERT INTO assessments
                (id, user_id, modality, status, unavailable_reason, created_at, consent_version,
-                consented_at, duration_seconds, files_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                consented_at, duration_seconds, files_json, result_json,
+                extracted_features_json, extraction_version, quality_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assessment_id,
                 user["id"],
                 modality,
-                "validation_required",
+                "completed" if completed else (
+                    "unavailable" if quality and quality.get("quality_status") == "artifact_unavailable"
+                    else "validation_required"
+                ),
                 reason,
                 created_at,
                 "v1",
                 created_at,
                 duration_seconds,
                 json.dumps(files),
+                json.dumps(result) if result else None,
+                json.dumps(extracted) if extracted is not None else None,
+                extraction_version,
+                json.dumps(quality) if quality else None,
             ),
         )
         row = db.execute("SELECT * FROM assessments WHERE id = ?", (assessment_id,)).fetchone()

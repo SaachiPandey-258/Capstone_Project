@@ -10,6 +10,9 @@ export type Assessment = {
   consented_at: string;
   duration_seconds: number;
   files: { kind: string; name: string; bytes: number; validated_rows: number | null }[];
+  extracted_features?: Record<string, number> | null;
+  extraction_version?: string | null;
+  quality?: Record<string, unknown> | null;
   result: null | Record<string, unknown>;
 };
 
