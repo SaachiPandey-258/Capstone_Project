@@ -10,9 +10,11 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       OSM_USER_AGENT: ${OSM_USER_AGENT:-MorrowResearchPortal/1.0}
       OSM_CONTACT_EMAIL: ${OSM_CONTACT_EMAIL:-}
+      MODEL_ARTIFACTS_DIR: /app/models
     volumes:
       - portal-data:/app/backend/.data
       - portal-uploads:/app/backend/uploads
+      - ./models:/app/models:ro
   frontend:
     build:
       context: frontend

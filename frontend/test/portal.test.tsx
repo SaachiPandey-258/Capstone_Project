@@ -113,6 +113,19 @@ describe("assessment validation and submission", () => {
   it("records, validates, and waits for the API before rendering an assessment result", async () => {
     const user = userEvent.setup();
     const submit = vi.spyOn(api, "submitAssessment");
+    const modelStatus = vi.spyOn(api, "modelAvailability").mockResolvedValue({
+      voice: {
+        artifact_available: true,
+        precomputed_features_supported: true,
+        raw_audio_inference_available: false,
+        reason: null,
+      },
+      fusion: {
+        artifact_files_available: false,
+        portal_inference_available: false,
+        reason: "Fusion checkpoint and scaler artifacts are unavailable.",
+      },
+    });
     let finishRequest: ((value: Assessment) => void) | undefined;
     submit.mockReturnValue(new Promise((resolve) => { finishRequest = resolve; }));
     const stopTrack = vi.fn();
@@ -137,6 +150,7 @@ describe("assessment validation and submission", () => {
     let clock = 1000;
     vi.spyOn(Date, "now").mockImplementation(() => clock);
     render(<AssessmentWizard />);
+    expect(await screen.findByText(/available for precomputed 16-feature input only/)).toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Submit assessment" });
     expect(button).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "Your assessment record was saved" })).not.toBeInTheDocument();
@@ -157,6 +171,7 @@ describe("assessment validation and submission", () => {
     expect(screen.getByText("Feature validation required")).toBeInTheDocument();
     expect(screen.getByText(/no prediction or score was generated/i)).toBeInTheDocument();
     submit.mockRestore();
+    modelStatus.mockRestore();
   });
 });
 

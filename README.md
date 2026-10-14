@@ -10,7 +10,7 @@ Morrow is a unified research and monitoring portal for organizing voice and opti
 - Consent-gated voice recording with browser microphone permission, playback/retry/delete, duration checks, and validated CSV/TXT gait file upload with a preview.
 - A FastAPI API stores user accounts, expiring sessions, consent metadata, assessment records, and uploaded files in local SQLite/filesystem storage. Assessment history and dashboard counts are account-scoped.
 - The frontend calls the API for authentication, assessment submission/history, reports, dashboard data, analytics, and specialist search. Loading, session-expiration, request-error, empty, and unavailable states are surfaced explicitly.
-- **Portal inference is currently unavailable.** Model artifacts are generated locally and excluded from Git, and this checkout contains no trained artifact or raw voice-audio reference fixtures. `scripts/feature_contract.py` defines the exact training feature order, and the model helper rejects artifacts with a different schema. However, no validated audio extractor exists for RPDE, DFA, or PPE, so the API persists a valid upload with `status: validation_required`; it does not run a scaler/model or return a score. No score, diagnosis, stage, or report is fabricated.
+- Research artifacts are generated locally and excluded from Git. The backend reports whether the compatible voice bundle is available at `/api/models/status`; authenticated `POST /api/research/predict-voice-features` accepts exactly 16 already-computed acoustic values and returns an exploratory `motor_UPDRS` estimate marked non-diagnostic. The browser recording upload path remains deliberately unscored: there is no validated extractor for RPDE, DFA, or PPE, so it persists a valid upload with `status: validation_required` and never invokes inference. The gait-fusion files are detected separately but are not enabled for portal uploads because those uploads are not validated as the research model's fixed 200-by-19 gait window.
 - Specialist search uses public OpenStreetMap community data: Nominatim geocodes a manually entered city/postal code, and Overpass returns nearby, specialty-tagged listings within the chosen radius. Optional browser geolocation sends coordinates only after the user requests it. Results include OpenStreetMap links and attribution; unknown locations return an empty result and service failures return an explicit unavailable state. No provider listings are fabricated.
 - No camera-based gait assessment, cloud-only services, clinical diagnosis, or disease staging is implemented.
 
@@ -38,6 +38,26 @@ uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
 ```
 
 The API is available at `http://localhost:8000`; its OpenAPI page is at `/docs`. By default it creates `backend/.data/portal.sqlite3` and stores uploads under `backend/uploads/`. Set `APP_DATA_DIR` and `APP_UPLOAD_DIR` to change those locations. These local files are ignored by Git.
+
+### Generate local research artifacts
+
+Use the included research dataset and scripts to create the ignored artifacts locally:
+
+```bash
+# Install the research stack from the repository root.
+python -m pip install -r requirements.txt
+
+# Generates models/baseline_rf_model.pkl and models/baseline_rf_metrics.json.
+python -m scripts.train_vocal
+
+# Optional, computationally heavier research experiment. Generates
+# fusion_model.pt, fusion_vocal_scaler.joblib, and fusion_metrics.json.
+python -m scripts.train_fusion
+```
+
+`models/` is excluded from Git. The voice trainer saves the fitted scaler, exact 16-feature order, and model metadata together in `baseline_rf_model.pkl`, which is the portal's expected artifact format. Set `MODEL_ARTIFACTS_DIR` if artifacts are stored elsewhere; the default is the repository's `models/` directory. Train and serve with compatible Python, scikit-learn, and joblib environments, and only load artifacts generated from trusted local sources because joblib files are executable serialized objects.
+
+The precomputed inference endpoint is not connected to microphone uploads. It requires an authenticated JSON request containing both `feature_columns` and `features`; the column names and numeric values must each match the exact order defined in `scripts/feature_contract.py`. It rejects missing, reordered, non-finite, or incompatible values and returns only a research estimate, not a diagnosis. Raw browser-audio feature extraction and gait-fusion inference on portal uploads remain unavailable.
 
 ### 2. Start the frontend
 
@@ -79,6 +99,8 @@ docker compose up --build
 ```
 
 The API is published at `http://localhost:8000` and the frontend at `http://localhost:3000`. Compose persists SQLite data and uploaded files in named local volumes. The frontend API URL and public Google client ID are build arguments, so rebuild the frontend after changing them. This is a local container setup, not cloud infrastructure.
+
+Compose mounts the host `models/` directory read-only into the API container. Generate the artifacts on the host with the commands above before or after starting Compose; `/api/models/status` will report their availability without copying model binaries into the image.
 
 ## Tests, lint, typecheck, and build
 

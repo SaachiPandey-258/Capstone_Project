@@ -18,6 +18,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from google.auth.exceptions import GoogleAuthError
 from pydantic import BaseModel, EmailStr, Field
 
+from scripts.feature_contract import VOICE_FEATURE_COLUMNS
+from scripts.inference import ModelNotReadyError, load_voice_model, predict_voice_features
 from .specialists import SpecialistServiceError, search_specialists
 
 
@@ -26,6 +28,9 @@ DATA_DIR = Path(os.getenv("APP_DATA_DIR", ROOT / ".data"))
 UPLOAD_DIR = Path(os.getenv("APP_UPLOAD_DIR", ROOT / "uploads"))
 DATABASE = DATA_DIR / "portal.sqlite3"
 MIGRATIONS_DIR = ROOT / "migrations"
+MODEL_ARTIFACTS_DIR = Path(
+    os.getenv("MODEL_ARTIFACTS_DIR") or ROOT.parent / "models"
+)
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 TOKEN_TTL = timedelta(days=30)
 
@@ -67,6 +72,11 @@ class Credentials(BaseModel):
 
 class GoogleCredential(BaseModel):
     credential: str = Field(min_length=1)
+
+
+class VoiceFeatureRequest(BaseModel):
+    feature_columns: List[str] = Field(min_length=16, max_length=16)
+    features: List[float] = Field(min_length=16, max_length=16)
 
 
 def connect() -> sqlite3.Connection:
@@ -146,6 +156,70 @@ def current_user(
 @app.get("/api/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/models/status")
+def model_status() -> Dict[str, object]:
+    voice_available = True
+    voice_reason = None
+    try:
+        load_voice_model(str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl"))
+    except ModelNotReadyError as exc:
+        voice_available = False
+        voice_reason = str(exc)
+
+    fusion_artifacts_available = all(
+        (MODEL_ARTIFACTS_DIR / filename).is_file()
+        for filename in ("fusion_model.pt", "fusion_vocal_scaler.joblib")
+    )
+    return {
+        "voice": {
+            "artifact_available": voice_available,
+            "precomputed_features_supported": True,
+            "raw_audio_inference_available": False,
+            "reason": voice_reason,
+        },
+        "fusion": {
+            "artifact_files_available": fusion_artifacts_available,
+            "portal_inference_available": False,
+            "reason": (
+                "Fusion artifacts are detected, but portal gait uploads are not "
+                "validated as the model's fixed 200-by-19 gait window."
+                if fusion_artifacts_available
+                else "Fusion checkpoint and scaler artifacts are unavailable."
+            ),
+        },
+    }
+
+
+@app.post("/api/research/predict-voice-features")
+def predict_precomputed_voice_features(
+    body: VoiceFeatureRequest,
+    _: Dict[str, str] = Depends(current_user),
+) -> Dict[str, object]:
+    if body.feature_columns != list(VOICE_FEATURE_COLUMNS):
+        raise HTTPException(
+            status_code=422,
+            detail="Voice feature columns must match the documented 16-feature order.",
+        )
+    try:
+        prediction = predict_voice_features(
+            [body.features], str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl")
+        )
+    except ModelNotReadyError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "model": "random-forest-updrs-v1",
+        "target": "motor_UPDRS",
+        "prediction": float(prediction[0]),
+        "is_diagnostic": False,
+        "notice": (
+            "Exploratory research estimate from precomputed acoustic features; "
+            "not a diagnosis, clinical score, or substitute for professional care."
+        ),
+    }
 
 
 @app.post("/api/auth/register", status_code=201)

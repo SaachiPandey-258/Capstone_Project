@@ -1,7 +1,12 @@
+import joblib
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
 
 from backend import app as api
+from scripts.feature_contract import VOICE_FEATURE_COLUMNS
 
 
 @pytest.fixture
@@ -9,6 +14,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "DATA_DIR", tmp_path / "db")
     monkeypatch.setattr(api, "DATABASE", tmp_path / "db" / "portal.sqlite3")
     monkeypatch.setattr(api, "UPLOAD_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(api, "MODEL_ARTIFACTS_DIR", tmp_path / "models")
     with TestClient(api.app) as test_client:
         yield test_client
 
@@ -27,6 +33,26 @@ def auth(token):
 
 def voice_file():
     return ("voice.webm", b"\x1aE\xdf\xa3sample-audio", "audio/webm")
+
+
+def write_voice_artifact(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    features = np.arange(64, dtype=np.float64).reshape(4, 16)
+    scaler = StandardScaler().fit(features)
+    model = RandomForestRegressor(n_estimators=2, random_state=1).fit(
+        scaler.transform(features), np.arange(4, dtype=np.float64)
+    )
+    path = directory / "baseline_rf_model.pkl"
+    joblib.dump({
+        "model": model,
+        "scaler": scaler,
+        "feature_columns": list(VOICE_FEATURE_COLUMNS),
+        "metadata": {
+            "model_version": "random-forest-updrs-v1",
+            "target": "motor_UPDRS",
+        },
+    }, path)
+    return features
 
 
 def test_registration_login_and_expired_or_missing_session(client):
@@ -53,6 +79,77 @@ def test_registration_login_and_expired_or_missing_session(client):
     assert "idx_assessments_user_created" in indexes
     assert "idx_assessments_user_status_created" in indexes
     api.initialize_database()
+
+
+def test_model_status_and_precomputed_inference_are_separate_from_audio_uploads(
+    client, tmp_path
+):
+    token = create_account(client)
+    missing = client.get("/api/models/status").json()
+    assert missing["voice"] == {
+        "artifact_available": False,
+        "precomputed_features_supported": True,
+        "raw_audio_inference_available": False,
+        "reason": "Voice model artifact is unavailable.",
+    }
+    assert client.post(
+        "/api/research/predict-voice-features",
+        headers=auth(token),
+        json={
+            "feature_columns": list(VOICE_FEATURE_COLUMNS),
+            "features": [0.0] * 16,
+        },
+    ).status_code == 503
+
+    features = write_voice_artifact(tmp_path / "models")
+    status = client.get("/api/models/status").json()
+    assert status["voice"]["artifact_available"] is True
+    assert status["voice"]["raw_audio_inference_available"] is False
+    prediction = client.post(
+        "/api/research/predict-voice-features",
+        headers=auth(token),
+        json={
+            "feature_columns": list(VOICE_FEATURE_COLUMNS),
+            "features": features[0].tolist(),
+        },
+    )
+    assert prediction.status_code == 200, prediction.text
+    assert prediction.json()["target"] == "motor_UPDRS"
+    assert prediction.json()["is_diagnostic"] is False
+    assert "not a diagnosis" in prediction.json()["notice"]
+    assert client.post(
+        "/api/research/predict-voice-features",
+        headers=auth(token),
+        json={
+            "feature_columns": list(VOICE_FEATURE_COLUMNS),
+            "features": [0.0] * 15,
+        },
+    ).status_code == 422
+    assert client.post(
+        "/api/research/predict-voice-features",
+        headers=auth(token),
+        json={
+            "feature_columns": list(reversed(VOICE_FEATURE_COLUMNS)),
+            "features": features[0].tolist(),
+        },
+    ).status_code == 422
+    assert client.post(
+        "/api/research/predict-voice-features",
+        json={
+            "feature_columns": list(VOICE_FEATURE_COLUMNS),
+            "features": features[0].tolist(),
+        },
+    ).status_code == 401
+
+    upload = client.post(
+        "/api/assessments",
+        headers=auth(token),
+        data={"consent": "true", "modality": "voice", "duration_seconds": "5"},
+        files={"voice": voice_file()},
+    )
+    assert upload.status_code == 201
+    assert upload.json()["status"] == "validation_required"
+    assert upload.json()["result"] is None
 
 
 def test_assessment_is_persisted_without_fabricated_result(client):

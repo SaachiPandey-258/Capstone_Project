@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { api, ApiError } from "@/lib/api";
 import { hasValidFusionInputs, previewGaitText, validateGaitFile, validateVoiceDuration, validateVoiceFile } from "@/lib/assessment";
-import type { Assessment } from "@/lib/types";
+import type { Assessment, ModelAvailability } from "@/lib/types";
 import { ErrorMessage } from "@/components/ui";
 import { ReportView } from "@/components/report-view";
 
@@ -27,6 +27,8 @@ export function AssessmentWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [result, setResult] = useState<Assessment | null>(null);
+  const [modelAvailability, setModelAvailability] = useState<ModelAvailability | null>(null);
+  const [modelAvailabilityError, setModelAvailabilityError] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -46,6 +48,18 @@ export function AssessmentWizard() {
   useEffect(() => () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    api.modelAvailability()
+      .then((availability) => {
+        if (active) setModelAvailability(availability);
+      })
+      .catch(() => {
+        if (active) setModelAvailabilityError("Model availability could not be checked.");
+      });
+    return () => { active = false; };
   }, []);
 
   function resetVoice() {
@@ -231,7 +245,15 @@ export function AssessmentWizard() {
         {gaitError && <ErrorMessage>{gaitError}</ErrorMessage>}
       </section>}
       <section className="submission-panel">
-        <div><strong>Analysis availability</strong><p>At this time no deployable inference model or voice-processing pipeline is installed. Uploading saves a record, but cannot produce a score.</p></div>
+        <div><strong>Analysis availability</strong><p>
+          {modelAvailabilityError
+            ? `${modelAvailabilityError} Uploads will still be saved without inference or a score.`
+            : modelAvailability === null
+              ? "Checking local research model artifacts… Browser audio uploads are not scored."
+              : modelAvailability.voice.artifact_available
+                ? "A research model artifact is available for precomputed 16-feature input only. No validated browser-audio extractor is installed, so uploads are saved without model inference or a score."
+                : `No compatible local voice model artifact is available${modelAvailability.voice.reason ? ` (${modelAvailability.voice.reason})` : ""}. Uploads are saved without inference or a score.`}
+        </p></div>
         {submitError && <ErrorMessage>{submitError}</ErrorMessage>}
         <button className="button" type="button" onClick={() => void submit()} disabled={!canSubmit}>{submitting ? "Uploading securely…" : "Submit assessment"}</button>
         {!canSubmit && !submitting && <span className="field-hint">Consent, a valid voice recording{modality === "voice_gait" ? ", and valid gait data" : ""} are required.</span>}

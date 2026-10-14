@@ -9,19 +9,17 @@ from typing import Any
 
 import joblib
 import numpy as np
-import torch
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.preprocessing import StandardScaler
 
 if __package__:
     from .feature_contract import AudioFeatureValidationRequired, VOICE_FEATURE_COLUMNS
     from .gait_contract import validate_gait_window
     from .training_utils import require_finite_matrix
-    from .train_fusion import MetaLearnerFusion
 else:
     from feature_contract import AudioFeatureValidationRequired, VOICE_FEATURE_COLUMNS
     from gait_contract import validate_gait_window
     from training_utils import require_finite_matrix
-    from train_fusion import MetaLearnerFusion
 
 
 class ModelNotReadyError(RuntimeError):
@@ -47,7 +45,11 @@ def _validate_voice_bundle(bundle: Any) -> dict[str, Any]:
         raise ModelNotReadyError("Voice model artifact has unsupported model metadata.")
     if not isinstance(model, RandomForestRegressor):
         raise ModelNotReadyError("Voice artifact does not contain the expected Random Forest.")
-    if not hasattr(scaler, "mean_") or len(scaler.mean_) != len(columns):
+    if (
+        not isinstance(scaler, StandardScaler)
+        or not hasattr(scaler, "mean_")
+        or np.asarray(scaler.mean_).shape != (len(columns),)
+    ):
         raise ModelNotReadyError("Voice scaler is unfitted or incompatible.")
     if getattr(model, "n_features_in_", None) != len(columns):
         raise ModelNotReadyError("Voice estimator is incompatible with its feature schema.")
@@ -91,12 +93,19 @@ def predict_voice_audio(*_args: Any, **_kwargs: Any) -> np.ndarray:
     )
 
 
-def _load_fusion_model(artifacts_dir: str) -> tuple[MetaLearnerFusion, Any, list[str]]:
+def _load_fusion_model(artifacts_dir: str) -> tuple[Any, Any, list[str]]:
     checkpoint_path = os.path.join(artifacts_dir, "fusion_model.pt")
     scaler_path = os.path.join(artifacts_dir, "fusion_vocal_scaler.joblib")
     if not os.path.isfile(checkpoint_path) or not os.path.isfile(scaler_path):
         raise ModelNotReadyError("Fusion model checkpoint or scaler is unavailable.")
     try:
+        import torch
+
+        if __package__:
+            from .train_fusion import MetaLearnerFusion
+        else:
+            from train_fusion import MetaLearnerFusion
+
         with open(scaler_path, "rb") as scaler_file:
             scaler_digest = hashlib.sha256(scaler_file.read()).hexdigest()
         scaler = joblib.load(scaler_path)
@@ -137,6 +146,8 @@ def predict_fusion_features(
     vocal_features: Any, gait_windows: Any, artifacts_dir: str
 ) -> np.ndarray:
     """Predict from aligned vocal rows and strict 200 x 19 gait windows."""
+    import torch
+
     model, scaler, columns = _load_fusion_model(artifacts_dir)
     vocal = require_finite_matrix(
         vocal_features, name="Vocal features", columns=len(columns)

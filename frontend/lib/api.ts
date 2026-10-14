@@ -1,4 +1,4 @@
-import type { Assessment, Dashboard, SpecialistSearch, SpecialistSearchResult, User } from "@/lib/types";
+import type { Assessment, Dashboard, ModelAvailability, SpecialistSearch, SpecialistSearchResult, User } from "@/lib/types";
 
 const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
 const TOKEN_KEY = "parkinson-portal-token";
@@ -77,6 +77,7 @@ export const api = {
     return result.user;
   },
   me: () => request<User>("/api/auth/me"),
+  modelAvailability: () => request<ModelAvailability>("/api/models/status"),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
   dashboard: () => request<Dashboard>("/api/dashboard"),
   assessments: () => request<Assessment[]>("/api/assessments"),

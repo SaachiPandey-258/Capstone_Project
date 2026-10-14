@@ -21,5 +21,9 @@ praat-parselmouth>=0.4.3
 # File handling
 python-multipart>=0.0.6
 aiofiles>=23.0.0
+# Model API and authentication integrations
+google-auth
+email-validator
+requests
 # Optional PDF generation (uncomment if needed)
 # weasyprint>=60.0

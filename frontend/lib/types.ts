@@ -19,6 +19,20 @@ export type Dashboard = {
   recent_assessments: Assessment[];
 };
 
+export type ModelAvailability = {
+  voice: {
+    artifact_available: boolean;
+    precomputed_features_supported: boolean;
+    raw_audio_inference_available: boolean;
+    reason: string | null;
+  };
+  fusion: {
+    artifact_files_available: boolean;
+    portal_inference_available: boolean;
+    reason: string;
+  };
+};
+
 export type SpecialistSearch = {
   location: string;
   category: string;
