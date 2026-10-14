@@ -35,7 +35,7 @@ export function SiteHeader() {
   return (
     <header className="site-header">
       <div className="header-inner">
-        <Link className="brand" href={user ? "/dashboard" : "/"} aria-label="Morrow home">
+        <Link className="brand" href={user ? "/dashboard" : "/"} aria-label="Morrow Parkinson’s assessment home">
           <span className="brand-mark" aria-hidden="true">m</span>
           <span>morrow<span className="brand-period">.</span></span>
         </Link>

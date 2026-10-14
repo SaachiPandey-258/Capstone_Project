@@ -278,6 +278,10 @@ em { color: var(--blue); font-style: normal; }
 .hero-trust svg { color: #a9c7ee; }
 .art-orbit { border-color: rgba(201, 222, 249, .16); animation: orbit-breathe 8s ease-in-out infinite alternate; }
 .orbit-two { animation-delay: -4s; }
+.art-signal { position: absolute; z-index: 0; width: 9px; height: 9px; border: 2px solid #9fc0e9; border-radius: 50%; background: #234a7b; box-shadow: 0 0 0 5px rgba(159, 192, 233, .09); animation: signal-pulse 3.8s ease-in-out infinite; }
+.signal-one { top: 23%; left: 18%; animation-delay: -.8s; }
+.signal-two { right: 18%; bottom: 27%; animation-delay: -2.1s; }
+.signal-three { top: 16%; right: 26%; width: 6px; height: 6px; border-width: 1px; animation-delay: -3s; }
 .art-center { border-color: rgba(210, 228, 251, .22); color: #d5e4f8; background: rgba(35, 74, 123, .64); backdrop-filter: blur(12px); }
 .art-card { border-color: rgba(227, 236, 248, .8); border-radius: 15px; box-shadow: 0 14px 32px rgba(3, 18, 40, .22); }
 .art-card-top { color: var(--navy); }
@@ -357,6 +361,10 @@ em { color: var(--blue); font-style: normal; }
 @keyframes card-drift {
   from { transform: translateY(0); }
   to { transform: translateY(-7px); }
+}
+@keyframes signal-pulse {
+  0%, 100% { opacity: .45; transform: scale(.8); }
+  50% { opacity: 1; transform: scale(1.35); box-shadow: 0 0 0 9px rgba(159, 192, 233, .02), 0 0 20px rgba(159, 192, 233, .35); }
 }
 
 @media (max-width: 960px) {

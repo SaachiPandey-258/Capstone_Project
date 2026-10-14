@@ -8,8 +8,8 @@ export default function HomePage() {
       <section className="hero-wrap">
         <div className="hero">
           <div className="hero-copy">
-            <div className="eyebrow"><span className="eyebrow-dot" /> A research-led assessment companion</div>
-            <h1>Multimodal Parkinson’s<br /><em>assessment.</em></h1>
+            <div className="eyebrow"><span className="eyebrow-dot" /> Morrow · a research-led assessment companion</div>
+            <h1>Morrow<br /><em>assessment, together.</em></h1>
             <p className="hero-intro">A private place to organize voice-only or voice + gait assessment records over time, and bring your observations to a conversation with your care team.</p>
             <div className="hero-actions">
               <Link className="button" href="/register">Create an account <ArrowRight size={17} /></Link>
@@ -17,8 +17,9 @@ export default function HomePage() {
             </div>
             <div className="hero-trust"><ShieldCheck size={17} /> Your assessment history is private to your account.</div>
           </div>
-          <div className="hero-art" role="img" aria-label="Abstract illustration of voice and optional movement data">
+          <div className="hero-art" role="img" aria-label="Morrow illustration showing voice and optional movement data">
             <div className="art-orbit orbit-one" /><div className="art-orbit orbit-two" />
+            <span className="art-signal signal-one" /><span className="art-signal signal-two" /><span className="art-signal signal-three" />
             <div className="art-card art-card-top"><AudioLines size={19} /><span>Voice</span><div className="waveform">{[12, 21, 30, 18, 40, 24, 34, 16, 27, 13, 31, 18, 11, 24].map((height, i) => <i key={i} style={{ height }} />)}</div></div>
             <div className="art-center"><Activity size={39} strokeWidth={1.25} /><span>Observe<br />over time</span></div>
             <div className="art-card art-card-bottom"><span className="art-check">↗</span><span>Movement<br /><small>Optional gait data</small></span></div>

@@ -4,8 +4,8 @@ import { SiteHeader } from "@/components/site-header";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Multimodal Parkinson’s Assessment | Morrow",
-  description: "A research-focused portal for organizing voice-only and voice + gait assessment records.",
+  title: "Morrow | Parkinson’s Assessment & Monitoring",
+  description: "Morrow is a private research and monitoring portal for voice-only and voice + gait assessment records.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -17,7 +17,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           {children}
           <footer className="site-footer">
             <div className="footer-inner">
-              <span>© {new Date().getFullYear()} Morrow Research</span>
+              <span>© {new Date().getFullYear()} Morrow · Parkinson’s assessment & monitoring</span>
               <span>Morrow is not a medical device and does not diagnose or provide medical advice. It does not replace a qualified clinician or support treatment decisions.</span>
             </div>
           </footer>
