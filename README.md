@@ -23,10 +23,7 @@ Requirements: Python 3.11+ is recommended (the API tests also pass on Python 3.9
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r backend/requirements-dev.txt
-
-# Run the versioned SQLite schema migration (also applied on API startup).
-python -m backend.migrate
+python -m pip install -r backend/requirements.txt
 
 # Optional: export a matching Google OAuth web-client ID to enable Google sign-in.
 export GOOGLE_CLIENT_ID=""
