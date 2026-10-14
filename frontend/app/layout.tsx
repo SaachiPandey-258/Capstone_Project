@@ -18,7 +18,6 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <footer className="site-footer">
             <div className="footer-inner">
               <span>© {new Date().getFullYear()} Parkinson’s Assessment Portal · Parkinson’s assessment & monitoring</span>
-              <span>This portal is not a medical device and does not diagnose or provide medical advice. It does not replace a qualified clinician or support treatment decisions.</span>
             </div>
           </footer>
         </AuthProvider>

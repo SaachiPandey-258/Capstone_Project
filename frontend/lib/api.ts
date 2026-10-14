@@ -1,6 +1,6 @@
 import type { Assessment, Dashboard, ModelAvailability, SpecialistSearch, SpecialistSearchResult, User } from "@/lib/types";
 
-const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/\/$/, "");
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8001").replace(/\/$/, "");
 const TOKEN_KEY = "parkinson-portal-token";
 
 export class ApiError extends Error {

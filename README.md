@@ -30,14 +30,14 @@ python -m backend.migrate
 
 # Optional: export a matching Google OAuth web-client ID to enable Google sign-in.
 export GOOGLE_CLIENT_ID=""
-export FRONTEND_ORIGINS="http://localhost:3000"
+export FRONTEND_ORIGINS="http://127.0.0.1:3001"
 # Identify this installation in OpenStreetMap requests; a contact email is recommended.
 export OSM_USER_AGENT="MorrowResearchPortal/1.0"
 export OSM_CONTACT_EMAIL=""
-uvicorn backend.app:app --reload --host 0.0.0.0 --port 8000
+uvicorn backend.app:app --reload --host 127.0.0.1 --port 8001
 ```
 
-The API is available at `http://localhost:8000`; its OpenAPI page is at `/docs`. By default it creates `backend/.data/portal.sqlite3` and stores uploads under `backend/uploads/`. Set `APP_DATA_DIR` and `APP_UPLOAD_DIR` to change those locations. These local files are ignored by Git.
+The API is available at `http://127.0.0.1:8001`; its OpenAPI page is at `/docs`. By default it creates `backend/.data/portal.sqlite3` and stores uploads under `backend/uploads/`. Set `APP_DATA_DIR` and `APP_UPLOAD_DIR` to change those locations. These local files are ignored by Git.
 
 For automatic extraction, use a 3–60 second single-speaker recording with clear sustained voicing and no intentional clipping. WAV works without external codecs; install `ffmpeg` and ensure it is on `PATH` for WebM, OGG, MP3, or M4A uploads. The extractor resamples to mono 16 kHz. Browser recordings with silence, excessive noise, clipping, unsupported codecs, or insufficient stable voicing are retained as validation-required records rather than scored.
 
@@ -69,11 +69,11 @@ In another terminal:
 cd frontend
 npm install
 cp ../.env.example .env.local
-# Edit .env.local: set NEXT_PUBLIC_API_URL=http://localhost:8000.
+# Edit .env.local: set NEXT_PUBLIC_API_URL=http://127.0.0.1:8001.
 npm run dev
 ```
 
-Open `http://localhost:3000`. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local` must match the backend `GOOGLE_CLIENT_ID` to show Google sign-in.
+Open `http://127.0.0.1:3001`. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local` must match the backend `GOOGLE_CLIENT_ID` to show Google sign-in.
 
 ## Google OAuth setup
 
