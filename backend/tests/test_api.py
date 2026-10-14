@@ -270,17 +270,22 @@ def test_fusion_requires_gait_and_rejects_bad_duration_or_audio(client):
 
 def test_gait_validation_is_required_for_fusion_and_scoped_to_owner(client):
     token = create_account(client)
+    gait_rows = "\n".join(
+        ",".join(str(float(column)) for column in range(19))
+        for _ in range(200)
+    ).encode()
     response = client.post(
         "/api/assessments",
         headers=auth(token),
         data={"consent": "true", "modality": "voice_gait", "duration_seconds": "5"},
         files={
-            "voice": voice_file(),
-            "gait": ("gait.csv", b"sensor_x,sensor_y\n1.2,2.4\n3.1,4.5\n", "text/csv"),
+            "voice": wav_voice_file(),
+            "gait": ("gait.csv", gait_rows, "text/csv"),
         },
     )
     assert response.status_code == 201
-    assert response.json()["status"] == "validation_required"
+    assert response.json()["status"] == "unavailable"
+    assert "fusion inference is unavailable" in response.json()["unavailable_reason"].lower()
     assert {item["kind"] for item in response.json()["files"]} == {"voice", "gait"}
 
     other_token = create_account(client, "other@example.org")

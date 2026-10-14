@@ -105,8 +105,9 @@ describe("assessment validation and submission", () => {
     expect(validateVoiceFile(new File(["voice"], "voice.bin"))).toContain("format");
     expect(validateGaitFile(new File(["x"], "gait.exe"))).toContain("CSV");
     expect(hasValidFusionInputs("voice_gait", new File(["voice"], "voice.webm"), 5, null, "")).toBe(false);
-    expect(previewGaitText("sensor_x,sensor_y\n1.2,2.4\n3.1,4.5", "gait.csv").error).toBeNull();
-    expect(previewGaitText("0.000\t71.72\t174.9\n0.010\t71.72\t174.9", "gait.txt").error).toBeNull();
+    const gaitRows = Array.from({ length: 200 }, (_, index) => Array.from({ length: 19 }, (_, column) => `${index + column}`).join(",")).join("\n");
+    expect(previewGaitText(`time,left,right\n${gaitRows}`, "gait.csv").error).toBeNull();
+    expect(previewGaitText(gaitRows.replaceAll(",", "\t"), "gait.txt").error).toBeNull();
     expect(previewGaitText("not,a,sensor,file", "gait.csv").error).toContain("numeric");
   });
 

@@ -1,7 +1,5 @@
-import csv
 import hashlib
 import hmac
-import io
 import json
 import os
 import secrets
@@ -20,7 +18,14 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .audio_features import AudioExtractionError, extract_audio_features
 from scripts.feature_contract import VOICE_FEATURE_COLUMNS
-from scripts.inference import ModelNotReadyError, load_voice_model, predict_voice_features
+from scripts.gait_contract import parse_gait_recording
+from scripts.inference import (
+    ModelNotReadyError,
+    _load_fusion_model,
+    load_voice_model,
+    predict_fusion_features,
+    predict_voice_features,
+)
 from .specialists import SpecialistServiceError, search_specialists
 
 
@@ -169,10 +174,14 @@ def model_status() -> Dict[str, object]:
         voice_available = False
         voice_reason = str(exc)
 
-    fusion_artifacts_available = all(
-        (MODEL_ARTIFACTS_DIR / filename).is_file()
-        for filename in ("fusion_model.pt", "fusion_vocal_scaler.joblib")
-    )
+    fusion_artifacts_available = False
+    fusion_reason = "Fusion checkpoint and scaler artifacts are unavailable."
+    try:
+        _load_fusion_model(str(MODEL_ARTIFACTS_DIR))
+        fusion_artifacts_available = True
+        fusion_reason = "Compatible fusion checkpoint, scaler, and 200x19 gait contract are available."
+    except ModelNotReadyError as exc:
+        fusion_reason = f"Fusion inference unavailable: {exc}"
     return {
         "voice": {
             "artifact_available": voice_available,
@@ -182,13 +191,8 @@ def model_status() -> Dict[str, object]:
         },
         "fusion": {
             "artifact_files_available": fusion_artifacts_available,
-            "portal_inference_available": False,
-            "reason": (
-                "Fusion artifacts are detected, but portal gait uploads are not "
-                "validated as the model's fixed 200-by-19 gait window."
-                if fusion_artifacts_available
-                else "Fusion checkpoint and scaler artifacts are unavailable."
-            ),
+            "portal_inference_available": fusion_artifacts_available,
+            "reason": fusion_reason,
         },
     }
 
@@ -367,37 +371,13 @@ async def read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> by
     return contents
 
 
-def validate_gait(contents: bytes, filename: str) -> int:
+def validate_gait(contents: bytes, filename: str) -> tuple[object, int]:
     try:
-        text = contents.decode("utf-8-sig")
-        delimiter = "\t" if filename.lower().endswith(".txt") else ","
-        rows = list(csv.reader(io.StringIO(text), delimiter=delimiter))
-        numeric_rows = 0
-        column_count = None
-        for row in rows[:1001]:
-            if not row or all(not cell.strip() for cell in row):
-                continue
-            try:
-                [float(cell) for cell in row]
-                if column_count is not None and len(row) != column_count:
-                    raise ValueError("Sensor rows must have a consistent number of columns.")
-                column_count = len(row)
-                numeric_rows += 1
-            except ValueError:
-                header = all(
-                    cell.replace("_", "").replace(" ", "").isalnum()
-                    and not any(character.isdigit() for character in cell)
-                    for cell in row
-                )
-                if numeric_rows != 0 or not header:
-                    raise
-        if numeric_rows < 2:
-            raise ValueError("At least two numeric data rows are required.")
-        return numeric_rows
-    except (UnicodeDecodeError, csv.Error, ValueError) as exc:
+        return parse_gait_recording(contents, filename)
+    except ValueError as exc:
         raise HTTPException(
             status_code=422,
-            detail="Gait data must be a readable CSV or tab-delimited text file with numeric sensor rows.",
+            detail=f"Gait validation failed: {exc}",
         ) from exc
 
 
@@ -443,13 +423,14 @@ async def create_assessment(
     voice_data = await read_upload(voice)
     validate_audio(voice_data, voice_name)
     gait_data = None
+    gait_window = None
     gait_rows = None
     if gait is not None:
         gait_name = (gait.filename or "").lower()
         if Path(gait_name).suffix not in (".csv", ".txt"):
             raise HTTPException(status_code=422, detail="Gait data must be a CSV or TXT file.")
         gait_data = await read_upload(gait)
-        gait_rows = validate_gait(gait_data, gait_name)
+        gait_window, gait_rows = validate_gait(gait_data, gait_name)
 
     assessment_id = str(uuid.uuid4())
     user_dir = UPLOAD_DIR / user["id"]
@@ -478,11 +459,37 @@ async def create_assessment(
     prediction = None
     reason = None
     result = None
-    if modality != "voice":
-        reason = (
-            "Validation required: voice + gait fusion is unavailable because uploaded "
-            "gait rows are not validated as the model's fixed 200x19 input. No score was produced."
-        )
+    if modality == "voice_gait":
+        try:
+            extraction = extract_audio_features(
+                voice_data, Path(voice_name).suffix, duration_hint=duration_seconds
+            )
+            prediction = float(predict_fusion_features(
+                [[extraction.features[column] for column in VOICE_FEATURE_COLUMNS]],
+                gait_window,
+                str(MODEL_ARTIFACTS_DIR),
+            )[0])
+            extracted = extraction.features
+            extraction_version = extraction.version
+            quality = extraction.quality
+            result = {
+                "summary": "Exploratory research estimate from validated voice and gait windows; not a diagnosis or clinical assessment.",
+                "model": "dual-branch-fusion-updrs-v1",
+                "target": "motor_UPDRS",
+                "prediction": prediction,
+                "gait_window": "first 200 rows of the validated 19-column recording",
+                "is_diagnostic": False,
+                "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
+            }
+        except AudioExtractionError as exc:
+            reason = f"Feature validation required: {exc} No prediction or score was produced."
+            quality = {"quality_status": "validation_required", "reason": str(exc)}
+        except ModelNotReadyError as exc:
+            reason = f"Analysis unavailable: {exc} No prediction or score was produced."
+            quality = {"quality_status": "artifact_unavailable", "reason": str(exc)}
+        except (TypeError, ValueError, RuntimeError) as exc:
+            reason = f"Analysis unavailable: gait or model validation failed ({exc}). No prediction or score was produced."
+            quality = {"quality_status": "validation_required", "reason": str(exc)}
     else:
         try:
             extraction = extract_audio_features(
@@ -581,6 +588,7 @@ async def create_manual_assessment(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     gait_data = None
+    gait_window = None
     gait_rows = None
     if modality == "voice_gait" and gait is None:
         raise HTTPException(status_code=422, detail="A valid gait file is required for voice + gait.")
@@ -589,7 +597,7 @@ async def create_manual_assessment(
         if Path(gait_name).suffix not in (".csv", ".txt"):
             raise HTTPException(status_code=422, detail="Gait data must be a CSV or TXT file.")
         gait_data = await read_upload(gait)
-        gait_rows = validate_gait(gait_data, gait_name)
+        gait_window, gait_rows = validate_gait(gait_data, gait_name)
 
     assessment_id = str(uuid.uuid4())
     user_dir = UPLOAD_DIR / user["id"]
@@ -610,16 +618,21 @@ async def create_manual_assessment(
             "validated_rows": gait_rows,
         })
 
-    fusion_reason = (
-        "Fusion inference is unavailable: portal gait uploads are validated as CSV/TXT "
-        "numeric rows but not as the research model's required 200x19 window. "
-        "The vocal features and gait upload were saved, but no fusion prediction or score was produced."
-    )
-    completed = modality == "voice" and prediction is not None
+    fusion_reason = None
+    if modality == "voice_gait":
+        try:
+            prediction = float(predict_fusion_features(
+                [values], gait_window, str(MODEL_ARTIFACTS_DIR)
+            )[0])
+        except ModelNotReadyError as exc:
+            fusion_reason = f"Analysis unavailable: {exc} No prediction or score was produced."
+        except (TypeError, ValueError, RuntimeError) as exc:
+            fusion_reason = f"Analysis unavailable: gait or model validation failed ({exc}). No prediction or score was produced."
+    completed = prediction is not None
     reason = None if completed else (fusion_reason if modality == "voice_gait" else unavailable_reason)
     result = None if not completed else {
         "summary": "Exploratory research estimate from the submitted 16-feature vocal contract; not a diagnosis or clinical assessment.",
-        "model": "random-forest-updrs-v1",
+        "model": "dual-branch-fusion-updrs-v1" if modality == "voice_gait" else "random-forest-updrs-v1",
         "target": "motor_UPDRS",
         "prediction": prediction,
         "is_diagnostic": False,

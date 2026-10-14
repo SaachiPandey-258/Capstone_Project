@@ -146,8 +146,12 @@ def predict_fusion_features(
     vocal_features: Any, gait_windows: Any, artifacts_dir: str
 ) -> np.ndarray:
     """Predict from aligned vocal rows and strict 200 x 19 gait windows."""
-    import torch
-
+    try:
+        import torch
+    except ImportError as exc:
+        raise ModelNotReadyError(
+            "Fusion inference is unavailable because PyTorch is not installed."
+        ) from exc
     model, scaler, columns = _load_fusion_model(artifacts_dir)
     vocal = require_finite_matrix(
         vocal_features, name="Vocal features", columns=len(columns)

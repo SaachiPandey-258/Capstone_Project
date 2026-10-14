@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import os
+import hashlib
+import joblib
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -46,6 +48,7 @@ class MultiModalDataset(Dataset):
         feature_cols = [c for c in vocal_df.columns
                         if c not in ['subject#', 'age', 'sex', 'test_time',
                                      'motor_UPDRS', 'total_UPDRS']]
+        self.feature_columns = feature_cols
 
         vocal_feats, left_feats, right_feats, targets = [], [], [], []
 
@@ -69,6 +72,7 @@ class MultiModalDataset(Dataset):
         X_vocal = scaler.fit_transform(np.array(vocal_feats))
 
         self.vocal_data     = torch.FloatTensor(X_vocal)
+        self.vocal_scaler   = scaler
         self.left_foot_data = torch.FloatTensor(np.array(left_feats))
         self.right_foot_data = torch.FloatTensor(np.array(right_feats))
         self.targets        = torch.FloatTensor(targets)
@@ -205,7 +209,19 @@ def train_model():
 
     # Save model
     os.makedirs(os.path.join(BASE_DIR, 'models'), exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(BASE_DIR, 'models', 'fusion_model.pt'))
+    scaler_path = os.path.join(BASE_DIR, 'models', 'fusion_vocal_scaler.joblib')
+    joblib.dump(dataset.vocal_scaler, scaler_path)
+    with open(scaler_path, "rb") as scaler_file:
+        scaler_digest = hashlib.sha256(scaler_file.read()).hexdigest()
+    torch.save({
+        "model_state_dict": model.state_dict(),
+        "feature_columns": dataset.feature_columns,
+        "model_version": "dual-branch-fusion-updrs-v1",
+        "target": "motor_UPDRS",
+        "gait_timesteps": 200,
+        "gait_columns": 19,
+        "scaler_sha256": scaler_digest,
+    }, os.path.join(BASE_DIR, 'models', 'fusion_model.pt'))
     print("Saved fusion model to models/fusion_model.pt")
 
 

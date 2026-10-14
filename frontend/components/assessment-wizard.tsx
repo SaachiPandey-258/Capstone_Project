@@ -101,10 +101,10 @@ export function AssessmentWizard() {
       <label className="check-row"><input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} /><span>I understand this is not a diagnosis or medical advice, and I consent to submitting these assessment inputs.</span></label>
     </section>
     <section className="wizard-card">
-      <div className="wizard-step"><span>02</span><div><h2>Choose assessment inputs</h2><p>Voice-only analysis is available for the exact 16-feature contract. Voice + gait uploads are saved, but fusion remains unavailable until its 200x19 preprocessing is validated.</p></div></div>
+      <div className="wizard-step"><span>02</span><div><h2>Choose assessment inputs</h2><p>Use either automatic audio extraction or the exact 16-feature manual vocal form. Optional gait scoring requires a validated 200x19 recording and compatible local fusion artifacts.</p></div></div>
       <div className="choice-grid">
         <label className={modality === "voice" ? "choice-card selected" : "choice-card"}><input aria-label="Voice-only assessment" type="radio" name="modality" checked={modality === "voice"} onChange={() => setModality("voice")} /><span><strong>Voice only</strong><small>Manual vocal feature form</small></span></label>
-        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait</strong><small>Gait is stored; fusion unavailable</small></span></label>
+        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait</strong><small>Validated fusion when artifacts are available</small></span></label>
       </div>
     </section>
     <section className="wizard-card">
@@ -116,13 +116,13 @@ export function AssessmentWizard() {
       </>}
     </section>
     {modality === "voice_gait" && <section className="wizard-card">
-      <div className="wizard-step"><span>04</span><div><h2>Select gait data</h2><p>Upload numeric CSV or tab-delimited TXT data. The file is validated and saved, but no fusion score is generated.</p></div></div>
+      <div className="wizard-step"><span>04</span><div><h2>Select gait data</h2><p>Upload the training contract: at least 200 rows of 19 columns in time, eight left sensors, eight right sensors, and two total-force columns. The first 200 rows are selected deterministically.</p></div></div>
       <label className="file-picker">Choose gait file<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void selectGait(event.target.files?.[0])} /></label>
       {gait && <p className="file-selected">{gait.name} · {(gait.size / 1024).toFixed(1)} KB</p>}
       {gaitPreview.length > 0 && <div className="preview-wrap"><p className="field-hint">Validated preview (first rows)</p><table className="preview-table"><tbody>{gaitPreview.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div>}
       {gaitError && <ErrorMessage>{gaitError}</ErrorMessage>}
     </section>}
-    <section className="submission-panel"><div><strong>Analysis availability</strong><p>{availability?.voice.artifact_available ? "The local research voice artifact is available for this exact 16-feature input." : "A compatible local voice artifact is not currently available; your submission will be saved as unavailable without a score."} {modality === "voice_gait" && "Fusion inference is explicitly unavailable until validated 200x19 preprocessing and artifacts are supported."}</p></div>
+    <section className="submission-panel"><div><strong>Analysis availability</strong><p>{availability?.voice.artifact_available ? "The local research voice artifact is available for this exact 16-feature input." : "A compatible local voice artifact is not currently available; your submission will be saved as unavailable without a score."} {modality === "voice_gait" && (availability?.fusion.portal_inference_available ? "Validated fusion artifacts are available." : availability?.fusion.reason || "Fusion artifacts are unavailable.")}</p></div>
       {submitError && <ErrorMessage>{submitError}</ErrorMessage>}<button className="button" type="button" onClick={() => void submit()} disabled={!canSubmit}>{submitting ? "Submitting securely…" : "Submit assessment"}</button>
       {!canSubmit && !submitting && <span className="field-hint">Consent, a supported 3–60 second recording or all 16 finite numeric values{modality === "voice_gait" ? ", and a valid gait file" : ""} are required.</span>}
     </section>
