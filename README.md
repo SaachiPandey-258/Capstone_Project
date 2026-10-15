@@ -1,15 +1,18 @@
-# Morrow — Parkinson’s Assessment & Monitoring Platform
+# Parkinson’s Assessment & Monitoring Platform
 
-Morrow is a unified research and monitoring portal for organizing voice and optional gait-data submissions, assessment history, reports, and progress analytics. It has one account model; there are no doctor/patient roles.
+> **Complete project documentation:** [docs/PROJECT_MANUAL.md](docs/PROJECT_MANUAL.md) covers setup, features, models, datasets, results, limitations and viva preparation. It supersedes any older details in this README.
 
-> **Medical disclaimer:** Morrow is not a medical device. It does not diagnose Parkinson’s disease, provide medical advice, or replace care from a qualified clinician. Do not use it to make treatment decisions. Speak with a healthcare professional about health concerns.
+The Parkinson’s Assessment Portal is a unified research and monitoring portal for organizing voice and optional gait-data submissions, assessment history, reports, and progress analytics. It has one account model; there are no doctor/patient roles.
+
+> **Medical disclaimer:** This portal is not a medical device. It does not diagnose Parkinson’s disease, provide medical advice, or replace care from a qualified clinician. Do not use it to make treatment decisions. Speak with a healthcare professional about health concerns.
 
 ## Current capabilities and limits
 
 - Public education pages, account registration/sign-in, protected account pages, and Google OpenID Connect sign-in (when configured).
-- Consent-gated voice recording/upload and manual vocal feature entry using the exact 16-column order in `scripts/feature_contract.py`, plus validated CSV/TXT gait file upload with a preview.
+- Consent-gated browser-microphone recording or audio upload, CSV import from the bundled `data/parkinsons.data` dataset (including record selection), and manual vocal-feature entry using the exact 16-column order in `scripts/feature_contract.py`, plus validated CSV/TXT gait-file upload with a preview.
 - A FastAPI API stores user accounts, expiring sessions, consent metadata, assessment records, and uploaded files in local SQLite/filesystem storage. Assessment history and dashboard counts are account-scoped.
 - The frontend calls the API for authentication, manual feature submission/history, reports, dashboard data, analytics, and specialist search. Loading, session-expiration, request-error, empty, and unavailable states are surfaced explicitly.
+- Completed reports can be viewed and downloaded as PDF files from the Reports section; assessments without validated inference do not generate a report or score.
 - Research artifacts are generated locally and excluded from Git. Voice-only recordings are decoded to mono 16 kHz PCM, extracted with `praat-parselmouth` plus SciPy RPDE/DFA/PPE implementations, strictly validated, and scored only when the exact artifact/scaler contract succeeds. The precomputed endpoint still accepts exactly 16 already-computed acoustic values and returns an exploratory `motor_UPDRS` estimate marked non-diagnostic. Gait uploads must contain at least 200 numeric rows and exactly 19 columns in the dataset order; inference deterministically selects the first 200 rows and uses the eight left/right sensor columns without additional gait normalization. Fusion remains unavailable in this checkout because `models/fusion_model.pt` and `models/fusion_vocal_scaler.joblib` are absent; records explain that exact blocker instead of fabricating a score.
 - Specialist search uses public OpenStreetMap community data: Nominatim geocodes a manually entered city/postal code, and Overpass returns nearby, specialty-tagged listings within the chosen radius. Optional browser geolocation sends coordinates only after the user requests it. Results include OpenStreetMap links and attribution; unknown locations return an empty result and service failures return an explicit unavailable state. No provider listings are fabricated.
 - No camera-based gait assessment, cloud-only services, clinical diagnosis, or disease staging is implemented.
@@ -46,8 +49,31 @@ Use the included research dataset and scripts to create the ignored artifacts lo
 # Install the research stack from the repository root.
 python -m pip install -r requirements.txt
 
-# Generates models/baseline_rf_model.pkl and models/baseline_rf_metrics.json.
+# Generates models/updrs_regressor.pkl and models/updrs_regressor_metrics.json:
+# ridge regression on 13 log-scaled Praat measures (data/parkinsons_updrs.data).
+# For people outside the training data it is no better than the cohort mean
+# (MAE ~7 points), so reports show the estimate as indicative only.
 python -m scripts.train_vocal
+
+# Generates models/pd_classifier.pkl and models/pd_classifier_metrics.json: the
+# Parkinson's voice screening classifier. Trained on data/pd_speech_features.csv
+# (Sakar et al., UCI "Parkinson's Disease Classification", CC BY 4.0; 252 speakers)
+# plus data/parkinsons.data (32 speakers), using 13 Praat perturbation/noise measures.
+# Speaker-independent CV: ROC AUC ~0.76. Reports use three tiers:
+#   >= 70% "Detected" (11% of healthy and 38% of PD speakers in testing)
+#   35-70% "Inconclusive"
+#   <  35% "Not detected" (47% of healthy and 12% of PD speakers in testing)
+python -m scripts.train_classifier
+
+# Audio screening model used for recorded/uploaded voice (the app's main path).
+# data/iyer2023/ holds phone recordings of a sustained /a/ (Iyer et al., 2023,
+# figshare doi:10.6084/m9.figshare.23849127, CC BY 4.0): 40 PD, 41 healthy.
+# Features are extracted with the app's own code (backend/audio_features.py),
+# so training matches live measurement. Age-balanced weights counter the
+# dataset's age gap. Cross-validated AUC ~0.78 (0.77 age-matched); tiers:
+#   >= 61% "Detected" (13% of healthy, 55% of PD), < 44% "Not detected" (53% / 15%).
+python -m scripts.extract_audio_dataset   # -> data/iyer2023_features.csv
+python -m scripts.train_audio_classifier  # -> models/pd_audio_classifier.pkl
 
 # Optional, computationally heavier research experiment. Generates
 # fusion_model.pt, fusion_vocal_scaler.joblib, and fusion_metrics.json.
@@ -70,20 +96,22 @@ cp ../.env.example .env.local
 npm run dev
 ```
 
-Open `http://127.0.0.1:3001`. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local` must match the backend `GOOGLE_CLIENT_ID` to show Google sign-in.
+Open `http://127.0.0.1:3001`. `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local` is used by the frontend and automatically passed to the API by `start.command`.
 
 ## Google OAuth setup
 
 1. Create a **Web application** OAuth client in the Google Cloud Console and configure its consent screen.
 2. Add the exact frontend origin (for example, `http://localhost:3000`) under **Authorized JavaScript origins**. The current Google Identity Services popup flow does not use an OAuth redirect URI; do not add one for this flow.
-3. Set the same web-client ID as `GOOGLE_CLIENT_ID` in the API environment and `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in the frontend environment. Add each production frontend origin to Google’s authorized JavaScript origins and to the API’s comma-separated `FRONTEND_ORIGINS`. The client ID is public; never expose a client secret in frontend code.
+3. Set the web-client ID as `NEXT_PUBLIC_GOOGLE_CLIENT_ID` in `frontend/.env.local`. `start.command` reads it and passes it to the API automatically; an explicitly exported `GOOGLE_CLIENT_ID` takes precedence. Restart both services after changing either setting. Add each production frontend origin to Google’s authorized JavaScript origins and to the API’s comma-separated `FRONTEND_ORIGINS`. The client ID is public; never expose a client secret in frontend code.
 4. The browser supplies a Google ID credential; the API verifies its signature, audience, expiry, issuer, and verified email with Google’s auth library before issuing a portal session. Email/password sign-in and registration remain available when these optional IDs are unset.
 
 ## OpenStreetMap specialist search
 
 Specialist search uses the public Nominatim geocoder and Overpass API without an API key or paid service. Nominatim requests are rate-limited to at most one per second and cached per API process; nearby-provider responses are cached for 15 minutes. Requests have a finite timeout, and provider failures are shown as unavailable rather than replaced with sample results. Set `OSM_USER_AGENT` to a descriptive application/version identifier and, preferably, `OSM_CONTACT_EMAIL` to an operator email as recommended by Nominatim’s usage policy. Public OSM services can be temporarily unavailable or impose their own fair-use limits; deployments needing higher volume should use a self-hosted service or a provider that permits the intended usage.
 
-Listings are based on community-entered specialty tags and may be incomplete or out of date. Results are not endorsements or a substitute for confirming services with a provider. Display the included OpenStreetMap attribution and copyright link whenever results are shown. Manual city/postal-code search is always available; optional browser geolocation is requested only after the user activates it.
+Search radii and displayed provider distances use kilometres; searches can cover up to 500 km. The broad Parkinson’s-care search includes mapped doctors, specialists, hospitals, clinics, rehabilitation, NGOs/charities, and listings with Parkinson’s in their name. Dedicated filters are available for neurology, movement disorders, facilities, physical therapy, and organizations. If Overpass returns no nearby matches, the API also searches Nominatim for named local listings, with requests rate-limited and the resulting data cached. Broad facility or organization listings are not proof of Parkinson’s expertise. If the primary Overpass service is unavailable, the API retries against two public fallback instances.
+
+Listings are based on community-entered OpenStreetMap tags and may be incomplete or out of date. Results are not endorsements or a substitute for confirming services with a provider. Display the included OpenStreetMap attribution and copyright link whenever results are shown. Manual city/postal-code search is always available; optional browser geolocation is requested only after the user activates it.
 
 ## Migrations and persistence
 
@@ -148,3 +176,28 @@ Educational links shown in the app point to the [U.S. National Institute of Neur
 - `frontend/` — Next.js App Router, accessible responsive UI, real API client, and Vitest/Testing Library tests.
 - `backend/` — FastAPI service, SQLite migration, upload validation, and API tests.
 - `scripts/`, `data/`, `models/` — existing research tooling/data; generated model binaries are not committed.
+
+## Local web application launchers
+
+When the web application directories are present, the repository-root launchers start
+both services with repository-relative paths:
+
+- **Windows double-click:** double-click `start.bat`. It opens separate Command Prompt
+  windows for the backend and frontend.
+- **macOS double-click:** make `start.command` executable once with
+  `chmod +x start.command`, then double-click `start.command`. Both services run
+  in the opened Terminal window; the launcher opens the frontend in your browser
+  after both services are ready. Keep Terminal open while using the app.
+- **macOS/Linux terminal:** from any directory, run
+  `./start.command` from the repository root (or
+  `/path/to/repository/start.command`). On Linux, the script uses
+  `x-terminal-emulator` when available; otherwise both services remain attached to
+  the current terminal.
+
+The macOS/Linux launcher starts `backend.app:app` from the repository root and
+expects `frontend/` to have an npm `dev` script. When the root `.venv` exists, the
+launcher installs `backend/requirements.txt` into it before startup; no unrelated
+or root research dependencies are installed automatically. The backend listens
+on `127.0.0.1:8001` with `FRONTEND_ORIGINS=http://127.0.0.1:3001`; the frontend
+listens on `127.0.0.1:3001` with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8001`.
+Missing directories or runtimes produce an explicit error.

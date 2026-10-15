@@ -82,6 +82,8 @@ export const api = {
   dashboard: () => request<Dashboard>("/api/dashboard"),
   assessments: () => request<Assessment[]>("/api/assessments"),
   assessment: (id: string) => request<Assessment>(`/api/assessments/${encodeURIComponent(id)}`),
+  deleteAssessment: (id: string) =>
+    request<void>(`/api/assessments/${encodeURIComponent(id)}`, { method: "DELETE" }),
   reports: () => request<Assessment[]>("/api/reports"),
   report: (id: string) => request<Assessment>(`/api/reports/${encodeURIComponent(id)}`),
   submitAssessment: (body: FormData) =>

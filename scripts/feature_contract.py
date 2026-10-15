@@ -22,3 +22,16 @@ VOICE_FEATURE_COLUMNS = (
 
 class AudioFeatureValidationRequired(RuntimeError):
     """Raised until raw audio yields validated values for the complete schema."""
+
+
+# Spectral/cepstral/pitch-variability measures computed from live audio
+# (band-limited to the 0-4 kHz telephone band so every recording source is
+# measured identically). Used by the audio screening model.
+SPECTRAL_FEATURE_COLUMNS = (
+    *(f"MFCC{i} SD" for i in range(1, 13)),
+    *(f"MFCC{i} delta SD" for i in range(1, 13)),
+    "CPPS",
+    "F0 SD (semitones)",
+    "F0 range (semitones)",
+    "Spectral tilt (dB)",
+)

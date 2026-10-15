@@ -22,9 +22,19 @@ from scripts.gait_contract import parse_gait_recording
 from scripts.inference import (
     ModelNotReadyError,
     _load_fusion_model,
+    load_pd_classifier,
+    PD_CLASSIFIER_VERSION,
     load_voice_model,
     predict_fusion_features,
+    predict_pd_screening,
+    predict_pd_screening_audio,
+    load_audio_classifier,
     predict_voice_features,
+    updrs_severity_band,
+    voice_model_mae,
+    UPDRS_MOTOR_MAX,
+    VOICE_MODEL_FILENAME,
+    VOICE_MODEL_VERSION,
 )
 from .specialists import SpecialistServiceError, search_specialists
 
@@ -38,6 +48,7 @@ MODEL_ARTIFACTS_DIR = Path(
     os.getenv("MODEL_ARTIFACTS_DIR") or ROOT.parent / "models"
 )
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+PATIENT_SEXES = ("female", "male", "other", "prefer_not_to_say")
 TOKEN_TTL = timedelta(days=30)
 
 @asynccontextmanager
@@ -169,10 +180,26 @@ def model_status() -> Dict[str, object]:
     voice_available = True
     voice_reason = None
     try:
-        load_voice_model(str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl"))
+        load_voice_model(str(MODEL_ARTIFACTS_DIR / VOICE_MODEL_FILENAME))
     except ModelNotReadyError as exc:
         voice_available = False
         voice_reason = str(exc)
+
+    screening_available = True
+    screening_reason = None
+    try:
+        load_pd_classifier(str(MODEL_ARTIFACTS_DIR / "pd_classifier.pkl"))
+    except ModelNotReadyError as exc:
+        screening_available = False
+        screening_reason = str(exc)
+
+    audio_screening_available = True
+    audio_screening_reason = None
+    try:
+        load_audio_classifier(str(MODEL_ARTIFACTS_DIR / "pd_audio_classifier.pkl"))
+    except ModelNotReadyError as exc:
+        audio_screening_available = False
+        audio_screening_reason = str(exc)
 
     fusion_artifacts_available = False
     fusion_reason = "Fusion checkpoint and scaler artifacts are unavailable."
@@ -188,6 +215,12 @@ def model_status() -> Dict[str, object]:
             "precomputed_features_supported": True,
             "raw_audio_inference_available": True,
             "reason": voice_reason,
+        },
+        "screening": {
+            "artifact_available": screening_available,
+            "reason": screening_reason,
+            "audio_artifact_available": audio_screening_available,
+            "audio_reason": audio_screening_reason,
         },
         "fusion": {
             "artifact_files_available": fusion_artifacts_available,
@@ -209,14 +242,14 @@ def predict_precomputed_voice_features(
         )
     try:
         prediction = predict_voice_features(
-            [body.features], str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl")
+            [body.features], str(MODEL_ARTIFACTS_DIR / VOICE_MODEL_FILENAME)
         )
     except ModelNotReadyError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {
-        "model": "random-forest-updrs-v1",
+        "model": VOICE_MODEL_VERSION,
         "target": "motor_UPDRS",
         "prediction": float(prediction[0]),
         "is_diagnostic": False,
@@ -359,7 +392,73 @@ def serialize_assessment(row: sqlite3.Row) -> Dict[str, object]:
         "extraction_version": row["extraction_version"],
         "quality": json.loads(row["quality_json"]) if row["quality_json"] else None,
         "result": json.loads(row["result_json"]) if row["result_json"] else None,
+        "patient": json.loads(row["patient_json"]) if row["patient_json"] else None,
     }
+
+
+def parse_patient(
+    full_name: str, age: Optional[int], sex: Optional[str], location: Optional[str]
+) -> Dict[str, object]:
+    name = (full_name or "").strip()
+    if not 1 <= len(name) <= 120:
+        raise HTTPException(status_code=422, detail="Enter the patient's full name (up to 120 characters).")
+    if age is not None and not 1 <= age <= 120:
+        raise HTTPException(status_code=422, detail="Age must be between 1 and 120.")
+    sex = (sex or "").strip().lower() or None
+    if sex is not None and sex not in PATIENT_SEXES:
+        raise HTTPException(status_code=422, detail="Choose a supported option for sex.")
+    location = (location or "").strip() or None
+    if location is not None and len(location) > 160:
+        raise HTTPException(status_code=422, detail="Location must be 160 characters or fewer.")
+    return {"full_name": name, "age": age, "sex": sex, "location": location}
+
+
+def build_result(
+    vocal_row: List[float], prediction: float, model: str, summary: str,
+    spectral: Optional[Dict[str, float]] = None, **extra: object
+) -> Dict[str, object]:
+    """Combine the UPDRS estimate with the voice screening classifier.
+
+    Recorded audio is screened with the spectral model trained on phone
+    recordings processed by this extractor; submitted feature values (lab
+    measurements) use the lab-feature model.
+    """
+    from_audio = bool(extra.pop("from_audio", False))
+    result: Dict[str, object] = {
+        "summary": summary,
+        "model": model,
+        "target": "motor_UPDRS",
+        "prediction": prediction,
+        "updrs_scale_max": UPDRS_MOTOR_MAX,
+        "severity_band": updrs_severity_band(prediction),
+        **extra,
+        "is_diagnostic": False,
+        "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
+    }
+    if model == VOICE_MODEL_VERSION:
+        try:
+            result["prediction_mae"] = voice_model_mae(str(MODEL_ARTIFACTS_DIR / VOICE_MODEL_FILENAME))
+        except ModelNotReadyError:
+            pass
+    try:
+        if spectral is None and from_audio:
+            raise ValueError("spectral voice measures could not be computed from this recording")
+        if spectral is not None:
+            screening = predict_pd_screening_audio(spectral, str(MODEL_ARTIFACTS_DIR / "pd_audio_classifier.pkl"))
+        else:
+            screening = predict_pd_screening([vocal_row], str(MODEL_ARTIFACTS_DIR / "pd_classifier.pkl"))
+        result.update({
+            "screening_model": screening["model_version"],
+            "pd_probability": screening["probability"],
+            "screening_tier": screening["tier"],
+            "pd_detected": {"detected": True, "not_detected": False}.get(screening["tier"]),
+            "pd_low_threshold": screening["low_threshold"],
+            "pd_high_threshold": screening["high_threshold"],
+            "screening_error_rates": screening["tier_rates"],
+        })
+    except (ModelNotReadyError, ValueError, RuntimeError) as exc:
+        result["screening_unavailable_reason"] = str(exc)
+    return result
 
 
 async def read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
@@ -405,8 +504,13 @@ async def create_assessment(
     duration_seconds: float = Form(...),
     voice: UploadFile = File(...),
     gait: Optional[UploadFile] = File(None),
+    patient_name: str = Form(""),
+    patient_age: Optional[int] = Form(None),
+    patient_sex: Optional[str] = Form(None),
+    patient_location: Optional[str] = Form(None),
     user: Dict[str, str] = Depends(current_user),
 ) -> Dict[str, object]:
+    patient = parse_patient(patient_name or user["name"], patient_age, patient_sex, patient_location)
     if not consent:
         raise HTTPException(status_code=422, detail="Consent is required before uploading.")
     if modality not in ("voice", "voice_gait"):
@@ -464,23 +568,28 @@ async def create_assessment(
             extraction = extract_audio_features(
                 voice_data, Path(voice_name).suffix, duration_hint=duration_seconds
             )
+            if any(extraction.features[column] is None for column in VOICE_FEATURE_COLUMNS):
+                raise ValueError(
+                    "RPDE, DFA and PPE could not be computed from this recording, and the "
+                    "voice + gait fusion model requires all 16 features; try voice-only"
+                )
             prediction = float(predict_fusion_features(
                 [[extraction.features[column] for column in VOICE_FEATURE_COLUMNS]],
                 gait_window,
                 str(MODEL_ARTIFACTS_DIR),
             )[0])
-            extracted = extraction.features
+            extracted = {**extraction.features, **(extraction.spectral or {})}
             extraction_version = extraction.version
             quality = extraction.quality
-            result = {
-                "summary": "Exploratory research estimate from validated voice and gait windows; not a diagnosis or clinical assessment.",
-                "model": "dual-branch-fusion-updrs-v1",
-                "target": "motor_UPDRS",
-                "prediction": prediction,
-                "gait_window": "first 200 rows of the validated 19-column recording",
-                "is_diagnostic": False,
-                "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
-            }
+            result = build_result(
+                [extraction.features[column] for column in VOICE_FEATURE_COLUMNS],
+                prediction,
+                "dual-branch-fusion-updrs-v1",
+                "Exploratory research estimate from validated voice and gait windows; not a diagnosis or clinical assessment.",
+                spectral=extraction.spectral,
+                from_audio=True,
+                gait_window="first 200 rows of the validated 19-column recording",
+            )
         except AudioExtractionError as exc:
             reason = f"Feature validation required: {exc} No prediction or score was produced."
             quality = {"quality_status": "validation_required", "reason": str(exc)}
@@ -497,19 +606,19 @@ async def create_assessment(
             )
             prediction = float(predict_voice_features(
                 [list(extraction.features[column] for column in VOICE_FEATURE_COLUMNS)],
-                str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl"),
+                str(MODEL_ARTIFACTS_DIR / VOICE_MODEL_FILENAME),
             )[0])
-            extracted = extraction.features
+            extracted = {**extraction.features, **(extraction.spectral or {})}
             extraction_version = extraction.version
             quality = extraction.quality
-            result = {
-                "summary": "Exploratory research estimate from extracted acoustic features; not a diagnosis or clinical assessment.",
-                "model": "random-forest-updrs-v1",
-                "target": "motor_UPDRS",
-                "prediction": prediction,
-                "is_diagnostic": False,
-                "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
-            }
+            result = build_result(
+                [extraction.features[column] for column in VOICE_FEATURE_COLUMNS],
+                prediction,
+                VOICE_MODEL_VERSION,
+                "Exploratory research estimate from extracted acoustic features; not a diagnosis or clinical assessment.",
+                spectral=extraction.spectral,
+                from_audio=True,
+            )
         except AudioExtractionError as exc:
             reason = f"Feature validation required: {exc} No prediction or score was produced."
             quality = {"quality_status": "validation_required", "reason": str(exc)}
@@ -526,8 +635,8 @@ async def create_assessment(
             """INSERT INTO assessments
                (id, user_id, modality, status, unavailable_reason, created_at, consent_version,
                 consented_at, duration_seconds, files_json, result_json,
-                extracted_features_json, extraction_version, quality_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                extracted_features_json, extraction_version, quality_json, patient_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 assessment_id,
                 user["id"],
@@ -546,6 +655,7 @@ async def create_assessment(
                 json.dumps(extracted) if extracted is not None else None,
                 extraction_version,
                 json.dumps(quality) if quality else None,
+                json.dumps(patient),
             ),
         )
         row = db.execute("SELECT * FROM assessments WHERE id = ?", (assessment_id,)).fetchone()
@@ -559,9 +669,14 @@ async def create_manual_assessment(
     feature_columns: str = Form(...),
     features: str = Form(...),
     gait: Optional[UploadFile] = File(None),
+    patient_name: str = Form(""),
+    patient_age: Optional[int] = Form(None),
+    patient_sex: Optional[str] = Form(None),
+    patient_location: Optional[str] = Form(None),
     user: Dict[str, str] = Depends(current_user),
 ) -> Dict[str, object]:
     """Persist exact vocal features and explicitly fail closed for fusion."""
+    patient = parse_patient(patient_name or user["name"], patient_age, patient_sex, patient_location)
     if not consent:
         raise HTTPException(status_code=422, detail="Consent is required before uploading.")
     if modality not in ("voice", "voice_gait"):
@@ -580,7 +695,7 @@ async def create_manual_assessment(
     unavailable_reason = None
     try:
         prediction = float(predict_voice_features(
-            [values], str(MODEL_ARTIFACTS_DIR / "baseline_rf_model.pkl")
+            [values], str(MODEL_ARTIFACTS_DIR / VOICE_MODEL_FILENAME)
         )[0])
     except ModelNotReadyError as exc:
         unavailable_reason = f"Analysis unavailable: {exc} No prediction or score was produced."
@@ -630,24 +745,24 @@ async def create_manual_assessment(
             fusion_reason = f"Analysis unavailable: gait or model validation failed ({exc}). No prediction or score was produced."
     completed = prediction is not None
     reason = None if completed else (fusion_reason if modality == "voice_gait" else unavailable_reason)
-    result = None if not completed else {
-        "summary": "Exploratory research estimate from the submitted 16-feature vocal contract; not a diagnosis or clinical assessment.",
-        "model": "dual-branch-fusion-updrs-v1" if modality == "voice_gait" else "random-forest-updrs-v1",
-        "target": "motor_UPDRS",
-        "prediction": prediction,
-        "is_diagnostic": False,
-        "notice": "Research output only; not a diagnosis, clinical score, or substitute for professional care.",
-    }
+    result = None if not completed else build_result(
+        [float(value) for value in values],
+        prediction,
+        "dual-branch-fusion-updrs-v1" if modality == "voice_gait" else VOICE_MODEL_VERSION,
+        "Exploratory research estimate from the submitted 16-feature vocal contract; not a diagnosis or clinical assessment.",
+    )
     created_at = utc_now().isoformat()
     with connect() as db:
         db.execute(
             """INSERT INTO assessments
                (id, user_id, modality, status, unavailable_reason, created_at, consent_version,
-                consented_at, duration_seconds, files_json, result_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                consented_at, duration_seconds, files_json, result_json,
+                extracted_features_json, patient_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (assessment_id, user["id"], modality, "completed" if completed else "unavailable",
              reason, created_at, "v1", created_at, 0, json.dumps(files),
-             json.dumps(result) if result else None),
+             json.dumps(result) if result else None,
+             json.dumps(dict(zip(VOICE_FEATURE_COLUMNS, values))), json.dumps(patient)),
         )
         row = db.execute("SELECT * FROM assessments WHERE id = ?", (assessment_id,)).fetchone()
     return serialize_assessment(row)
@@ -675,6 +790,27 @@ def get_assessment(
     if row is None:
         raise HTTPException(status_code=404, detail="Assessment not found.")
     return serialize_assessment(row)
+
+
+@app.delete("/api/assessments/{assessment_id}", status_code=204)
+def delete_assessment(
+    assessment_id: str, user: Dict[str, str] = Depends(current_user)
+) -> None:
+    """Permanently delete one of the user's assessments and its uploaded files."""
+    with connect() as db:
+        deleted = db.execute(
+            "DELETE FROM assessments WHERE id = ? AND user_id = ?",
+            (assessment_id, user["id"]),
+        ).rowcount
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Assessment not found.")
+    user_dir = UPLOAD_DIR / user["id"]
+    try:
+        uuid.UUID(assessment_id)
+    except ValueError:
+        return
+    for path in user_dir.glob(f"{assessment_id}-*"):
+        path.unlink(missing_ok=True)
 
 
 @app.get("/api/reports")
@@ -727,8 +863,11 @@ def dashboard(user: Dict[str, str] = Depends(current_user)) -> Dict[str, object]
 @app.get("/api/specialists")
 def find_specialists(
     location: str = Query(..., min_length=2, max_length=120),
-    category: str = Query(..., pattern="^(neurology|movement-disorders|physical-therapy)$"),
-    radius: int = Query(..., ge=1, le=100),
+    category: str = Query(
+        ...,
+        pattern="^(parkinsons-care|neurology|movement-disorders|physical-therapy|hospitals-clinics|organizations)$",
+    ),
+    radius: int = Query(..., ge=1, le=500, description="Search radius in kilometres."),
     latitude: Optional[float] = Query(None, ge=-90, le=90),
     longitude: Optional[float] = Query(None, ge=-180, le=180),
     user: Dict[str, str] = Depends(current_user),

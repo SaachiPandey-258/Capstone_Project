@@ -1,0 +1,26 @@
+{
+  "model": "rf-spectral-pd-screen-v4",
+  "target": "status (1 = Parkinson's)",
+  "data": "Iyer et al. 2023 (figshare 10.6084/m9.figshare.23849127, CC BY 4.0), features from backend.audio_features",
+  "protocol": "StratifiedKFold (5 folds, 20 repeats), age-balanced sample weights; refit on all",
+  "thresholds": {
+    "not_detected_below": 0.44,
+    "detected_at_or_above": 0.61
+  },
+  "n_samples": 78,
+  "metrics": {
+    "roc_auc": 0.7820184089414858,
+    "roc_auc_age_55_plus": 0.7654320987654322,
+    "score_age_correlation_healthy": -0.028991370408095594,
+    "tiers": {
+      "pd_detected": 0.5512820512820513,
+      "pd_inconclusive": 0.2987179487179487,
+      "pd_not_detected": 0.15,
+      "healthy_detected": 0.13076923076923078,
+      "healthy_inconclusive": 0.3346153846153846,
+      "healthy_not_detected": 0.5346153846153846
+    }
+  },
+  "artifact_sha256": "ee60780afbb017ae5a46d96d0a9d63565e3d88c3deb7457a62538eacb6cd952c",
+  "limitations": "Trained on 78 phone recordings of a sustained /a/ (39 people with Parkinson's, 39 healthy) from one public dataset, with age balancing because healthy participants were much younger. Cross-validated only; no external or clinical validation. Screening research output, not a diagnosis."
+}

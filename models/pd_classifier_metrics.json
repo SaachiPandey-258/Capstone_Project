@@ -1,0 +1,26 @@
+{
+  "model": "logistic-pd-screen-v3",
+  "target": "status (1 = Parkinson's)",
+  "protocol": "StratifiedGroupKFold (5 folds by speaker, 10 repeats); cross-dataset transfer; refit on all speakers",
+  "thresholds": {
+    "not_detected_below": 0.35,
+    "detected_at_or_above": 0.7
+  },
+  "n_samples": 951,
+  "n_speakers": 284,
+  "metrics": {
+    "roc_auc": 0.7579377637130801,
+    "tiers": {
+      "pd_detected": 0.3831223628691983,
+      "pd_inconclusive": 0.4928270042194093,
+      "pd_not_detected": 0.1240506329113924,
+      "healthy_detected": 0.11458333333333333,
+      "healthy_inconclusive": 0.4175,
+      "healthy_not_detected": 0.46791666666666665
+    },
+    "sakar_to_little_roc_auc": 0.8313492063492063,
+    "little_to_sakar_roc_auc": 0.7319739952718676
+  },
+  "artifact_sha256": "01864c5f653429e1b3d9f2ed247d4833a61e4cc19464bdad025d47b786d5650b",
+  "limitations": "Trained on 951 sustained-vowel recordings from 284 speakers (212 with Parkinson's, 72 healthy) from two research datasets; validated only by speaker-independent cross-validation and cross-dataset transfer, not clinically. Phone and laptop microphones differ from the research recording setups. Screening research output, not a diagnosis."
+}

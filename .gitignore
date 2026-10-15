@@ -21,3 +21,19 @@ models/*.h5
 models/*.pkl
 models/*.joblib
 models/*.pt
+
+# Local runtime data — never commit user accounts or voice recordings
+backend/.data/
+backend/uploads/
+.venv/
+
+# Frontend dependencies/build output (reinstall with `npm install`)
+frontend/node_modules/
+frontend/.next/
+
+# Trained models used by the portal are small and committed so the app runs after cloning
+!models/pd_audio_classifier.pkl
+!models/pd_classifier.pkl
+!models/updrs_regressor.pkl
+!models/fusion_model.pt
+!models/fusion_vocal_scaler.joblib

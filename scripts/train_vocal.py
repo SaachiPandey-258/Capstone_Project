@@ -1,29 +1,39 @@
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-import joblib
-import os
+"""Train the voice-only motor UPDRS (Part III) regressor.
+
+Data: data/parkinsons_updrs.data (Tsanas et al.), 5,875 telemonitoring
+recordings from 42 people with early-stage Parkinson's.
+
+Model selection used subject-grouped cross-validation (no person in both
+training and test folds). Random forest, gradient boosting and ridge models
+on the 16-feature contract, the 13 Praat-compatible measures, and with
+age/sex were compared; none clearly beats predicting the cohort mean for
+unseen people, which is the honest ceiling of this dataset. Ridge regression
+on the 13 log-scaled Praat measures had the lowest error and does not depend
+on the portal's uncalibrated RPDE/DFA/PPE implementations, so it is used.
+"""
+
 import hashlib
+import os
+
+import joblib
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.model_selection import GroupKFold
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
 if __package__:
     from .feature_contract import VOICE_FEATURE_COLUMNS
-    from .training_utils import (
-        fit_training_scaler,
-        require_finite_matrix,
-        subject_independent_split,
-        write_metrics,
-    )
+    from .training_utils import log_perturbation_features, require_finite_matrix, write_metrics
 else:
     from feature_contract import VOICE_FEATURE_COLUMNS
-    from training_utils import (
-        fit_training_scaler,
-        require_finite_matrix,
-        subject_independent_split,
-        write_metrics,
-    )
+    from training_utils import log_perturbation_features, require_finite_matrix, write_metrics
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_VERSION = "ridge-log-updrs-v2"
+REGRESSOR_COLUMNS = list(VOICE_FEATURE_COLUMNS[:13])
 
 
 def vocal_feature_columns(df):
@@ -33,88 +43,68 @@ def vocal_feature_columns(df):
     return list(VOICE_FEATURE_COLUMNS)
 
 
-def train_baseline(random_state=42):
-    print("Loading Vocal Data for Baseline Model...")
-    df = pd.read_csv(os.path.join(BASE_DIR, 'data', 'parkinsons_updrs.data'))
-
-    # Target variable: motor_UPDRS
-    feature_columns = vocal_feature_columns(df)
-    X = require_finite_matrix(df[feature_columns].values, name="Vocal features")
-    y = require_finite_matrix(
-        df[['motor_UPDRS']].values, name="motor_UPDRS target", columns=1
-    ).ravel()
-    groups = df['subject#'].to_numpy()
-    print(f"Dataset shape: {X.shape[0]} records, {X.shape[1]} vocal features.")
-
-    train_indices, test_indices = subject_independent_split(
-        groups, test_size=0.2, random_state=random_state
+def build_model():
+    return make_pipeline(
+        FunctionTransformer(log_perturbation_features), StandardScaler(), Ridge(alpha=10.0)
     )
-    X_train, X_test = X[train_indices], X[test_indices]
-    y_train, y_test = y[train_indices], y[test_indices]
 
-    # Fit preprocessing on training subjects only.
-    scaler, scaled_features = fit_training_scaler(X, train_indices)
-    X_train_scaled = scaled_features[train_indices]
-    X_test_scaled = scaled_features[test_indices]
 
-    # Train Random Forest (The reference paper's optimal model)
-    print("Training Random Forest Regressor (Baseline)...")
-    rf_model = RandomForestRegressor(
-        n_estimators=100, random_state=random_state, n_jobs=-1
+def train_baseline():
+    df = pd.read_csv(os.path.join(BASE_DIR, "data", "parkinsons_updrs.data"))
+    X = require_finite_matrix(df[REGRESSOR_COLUMNS].values, name="Vocal features", columns=13)
+    y = df["motor_UPDRS"].to_numpy(dtype=np.float64)
+    groups = df["subject#"].to_numpy()
+
+    predictions = np.zeros(len(y))
+    baseline = np.zeros(len(y))
+    for train_idx, test_idx in GroupKFold(n_splits=6).split(X, y, groups):
+        predictions[test_idx] = build_model().fit(X[train_idx], y[train_idx]).predict(X[test_idx])
+        baseline[test_idx] = y[train_idx].mean()
+    metrics = {
+        "mae": float(mean_absolute_error(y, predictions)),
+        "rmse": float(np.sqrt(mean_squared_error(y, predictions))),
+        "r2": float(r2_score(y, predictions)),
+        "cohort_mean_mae": float(mean_absolute_error(y, baseline)),
+    }
+    print("Subject-independent 6-fold CV:", metrics)
+
+    model = build_model().fit(X, y)
+    limitations = (
+        "Trained on 42 people with early-stage Parkinson's (motor UPDRS roughly 5-40). "
+        "For people not in the training data it is no more accurate than the cohort "
+        f"average (MAE {metrics['mae']:.1f} points); treat the estimate as indicative only."
     )
-    rf_model.fit(X_train_scaled, y_train)
-
-    # Evaluate
-    predictions = rf_model.predict(X_test_scaled)
-    rmse = np.sqrt(mean_squared_error(y_test, predictions))
-    mae = mean_absolute_error(y_test, predictions)
-    r2 = r2_score(y_test, predictions)
-
-    print("-" * 40)
-    print("SUBJECT-INDEPENDENT HOLDOUT (Vocal Data Only; exploratory):")
-    print(f"RMSE:      {rmse:.4f}")
-    print(f"MAE:       {mae:.4f}")
-    print(f"R-squared: {r2:.4f}")
-    print("-" * 40)
-    # Keep the estimator, fitted preprocessing, and exact feature order together.
-    models_dir = os.path.join(BASE_DIR, 'models')
-    os.makedirs(models_dir, exist_ok=True)
-    artifact_path = os.path.join(models_dir, 'baseline_rf_model.pkl')
     bundle = {
-        'model': rf_model,
-        'scaler': scaler,
-        'feature_columns': feature_columns,
-        'metadata': {
-            'model_version': 'random-forest-updrs-v1',
-            'target': 'motor_UPDRS',
-            'split_protocol': 'GroupShuffleSplit by subject#; 80/20 holdout',
-            'random_state': random_state,
-            'limitations': (
-                'Single subject-independent holdout on the supplied research '
-                'dataset; not external validation or clinical evidence. The '
-                'RPDE, DFA, and PPE values are supplied dataset features; this '
-                'repository does not provide validated audio feature extraction.'
-            ),
+        "model": model,
+        "feature_columns": REGRESSOR_COLUMNS,
+        "feature_min": X.min(axis=0).tolist(),
+        "feature_max": X.max(axis=0).tolist(),
+        "metadata": {
+            "model_version": MODEL_VERSION,
+            "target": "motor_UPDRS",
+            "mae": metrics["mae"],
+            "limitations": limitations,
         },
     }
+    models_dir = os.path.join(BASE_DIR, "models")
+    os.makedirs(models_dir, exist_ok=True)
+    artifact_path = os.path.join(models_dir, "updrs_regressor.pkl")
     joblib.dump(bundle, artifact_path)
-    with open(artifact_path, 'rb') as artifact_file:
+    with open(artifact_path, "rb") as artifact_file:
         artifact_sha256 = hashlib.sha256(artifact_file.read()).hexdigest()
-    write_metrics(os.path.join(models_dir, 'baseline_rf_metrics.json'), {
-        'model': 'random-forest-updrs-v1',
-        'target': 'motor_UPDRS',
-        'protocol': 'subject-independent GroupShuffleSplit (80/20 by subject#)',
-        'random_state': random_state,
-        'n_train_samples': int(len(train_indices)),
-        'n_test_samples': int(len(test_indices)),
-        'n_train_subjects': int(len(np.unique(groups[train_indices]))),
-        'n_test_subjects': int(len(np.unique(groups[test_indices]))),
-        'metrics': {'rmse': float(rmse), 'mae': float(mae), 'r2': float(r2)},
-        'artifact_sha256': artifact_sha256,
-        'limitations': bundle['metadata']['limitations'],
+    write_metrics(os.path.join(models_dir, "updrs_regressor_metrics.json"), {
+        "model": MODEL_VERSION,
+        "target": "motor_UPDRS",
+        "protocol": "GroupKFold (6 folds by subject#); refit on all subjects",
+        "n_samples": int(len(y)),
+        "n_subjects": int(len(np.unique(groups))),
+        "metrics": metrics,
+        "artifact_sha256": artifact_sha256,
+        "limitations": limitations,
     })
-    print(f"Saved model and fitted scaler to {artifact_path}")
+    print(f"Saved UPDRS regressor to {artifact_path}")
     return bundle
+
 
 if __name__ == "__main__":
     train_baseline()

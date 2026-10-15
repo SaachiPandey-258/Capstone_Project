@@ -1,0 +1,15 @@
+{
+  "model": "ridge-log-updrs-v2",
+  "target": "motor_UPDRS",
+  "protocol": "GroupKFold (6 folds by subject#); refit on all subjects",
+  "n_samples": 5875,
+  "n_subjects": 42,
+  "metrics": {
+    "mae": 6.951064006193036,
+    "rmse": 8.15038327013857,
+    "r2": -0.005369404971220293,
+    "cohort_mean_mae": 7.1316948245982195
+  },
+  "artifact_sha256": "24b41d286cadaa9ca1fa7d96c99bec0ace961aee41cc1132a5168d5d8cd6f12c",
+  "limitations": "Trained on 42 people with early-stage Parkinson's (motor UPDRS roughly 5-40). For people not in the training data it is no more accurate than the cohort average (MAE 7.0 points); treat the estimate as indicative only."
+}

@@ -8,7 +8,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import torch
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
 from scripts.gait_contract import (
@@ -147,18 +148,18 @@ class GaitContractTests(unittest.TestCase):
 class InferenceReadinessTests(unittest.TestCase):
     def _voice_artifact(self, directory):
         features = np.arange(64, dtype=np.float64).reshape(4, 16)
-        scaler = StandardScaler().fit(features)
-        model = RandomForestRegressor(n_estimators=2, random_state=1).fit(
-            scaler.transform(features), np.arange(4, dtype=np.float64)
+        model = make_pipeline(StandardScaler(), Ridge()).fit(
+            features[:, :13], np.arange(4, dtype=np.float64)
         )
         columns = list(VOICE_FEATURE_COLUMNS)
         path = os.path.join(directory, "voice.pkl")
         joblib.dump({
             "model": model,
-            "scaler": scaler,
-            "feature_columns": columns,
+            "feature_columns": columns[:13],
+            "feature_min": features[:, :13].min(axis=0).tolist(),
+            "feature_max": features[:, :13].max(axis=0).tolist(),
             "metadata": {
-                "model_version": "random-forest-updrs-v1",
+                "model_version": "ridge-log-updrs-v2",
                 "target": "motor_UPDRS",
             },
         }, path)
@@ -174,7 +175,7 @@ class InferenceReadinessTests(unittest.TestCase):
             prediction = predict_voice_features(features[:1], path)
             self.assertEqual(prediction.shape, (1,))
             bundle = joblib.load(path)
-            expected = bundle["model"].predict(bundle["scaler"].transform(features[:1]))
+            expected = bundle["model"].predict(features[:1, :13])
             np.testing.assert_allclose(prediction, expected)
             named_features = dict(zip(columns, features[0]))
             self.assertEqual(
@@ -185,7 +186,7 @@ class InferenceReadinessTests(unittest.TestCase):
                 predict_voice_features(reordered_features, path)
             with self.assertRaisesRegex(ValueError, "finite"):
                 predict_voice_features(np.full((1, 16), np.nan), path)
-            bundle["feature_columns"] = list(reversed(columns))
+            bundle["feature_columns"] = list(reversed(columns[:13]))
             incompatible_path = os.path.join(directory, "incompatible-voice.pkl")
             joblib.dump(bundle, incompatible_path)
             with self.assertRaisesRegex(ModelNotReadyError, "invalid feature schema"):

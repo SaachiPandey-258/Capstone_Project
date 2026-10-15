@@ -9,15 +9,13 @@ from typing import Any
 
 import joblib
 import numpy as np
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.preprocessing import StandardScaler
 
 if __package__:
-    from .feature_contract import AudioFeatureValidationRequired, VOICE_FEATURE_COLUMNS
+    from .feature_contract import AudioFeatureValidationRequired, SPECTRAL_FEATURE_COLUMNS, VOICE_FEATURE_COLUMNS
     from .gait_contract import validate_gait_window
     from .training_utils import require_finite_matrix
 else:
-    from feature_contract import AudioFeatureValidationRequired, VOICE_FEATURE_COLUMNS
+    from feature_contract import AudioFeatureValidationRequired, SPECTRAL_FEATURE_COLUMNS, VOICE_FEATURE_COLUMNS
     from gait_contract import validate_gait_window
     from training_utils import require_finite_matrix
 
@@ -26,61 +24,77 @@ class ModelNotReadyError(RuntimeError):
     """Raised when required model artifacts are absent or incompatible."""
 
 
-def _validate_voice_bundle(bundle: Any) -> dict[str, Any]:
-    if not isinstance(bundle, dict):
-        raise ModelNotReadyError("Voice model artifact is not a supported bundle.")
-    required = {"model", "scaler", "feature_columns", "metadata"}
-    if not required.issubset(bundle):
-        raise ModelNotReadyError("Voice model artifact is missing required components.")
-    columns = bundle["feature_columns"]
-    model, scaler = bundle["model"], bundle["scaler"]
-    if not isinstance(columns, list) or columns != list(VOICE_FEATURE_COLUMNS):
-        raise ModelNotReadyError("Voice model artifact has an invalid feature schema.")
-    metadata = bundle["metadata"]
-    if (
-        not isinstance(metadata, dict)
-        or metadata.get("model_version") != "random-forest-updrs-v1"
-        or metadata.get("target") != "motor_UPDRS"
-    ):
-        raise ModelNotReadyError("Voice model artifact has unsupported model metadata.")
-    if not isinstance(model, RandomForestRegressor):
-        raise ModelNotReadyError("Voice artifact does not contain the expected Random Forest.")
-    if (
-        not isinstance(scaler, StandardScaler)
-        or not hasattr(scaler, "mean_")
-        or np.asarray(scaler.mean_).shape != (len(columns),)
-    ):
-        raise ModelNotReadyError("Voice scaler is unfitted or incompatible.")
-    if getattr(model, "n_features_in_", None) != len(columns):
-        raise ModelNotReadyError("Voice estimator is incompatible with its feature schema.")
-    return bundle
+VOICE_MODEL_VERSION = "ridge-log-updrs-v2"
+VOICE_MODEL_FILENAME = "updrs_regressor.pkl"
+PRAAT_COLUMNS = list(VOICE_FEATURE_COLUMNS[:13])
 
 
-def load_voice_model(artifact_path: str) -> dict[str, Any]:
+def _load_pipeline_bundle(
+    artifact_path: str, version: str, label: str, columns: list[str] | None = None
+) -> dict[str, Any]:
+    """Load a {model, feature_columns, feature_min/max, metadata} artifact.
+
+    Both voice models consume the 13 Praat-compatible columns of the
+    16-feature contract and clip inputs to the training range.
+    """
     if not os.path.isfile(artifact_path):
-        raise ModelNotReadyError("Voice model artifact is unavailable.")
+        raise ModelNotReadyError(f"{label} artifact is unavailable.")
     try:
         bundle = joblib.load(artifact_path)
     except Exception as exc:
-        raise ModelNotReadyError("Voice model artifact could not be loaded.") from exc
-    return _validate_voice_bundle(bundle)
+        raise ModelNotReadyError(f"{label} artifact could not be loaded.") from exc
+    required = {"model", "feature_columns", "feature_min", "feature_max", "metadata"}
+    if not isinstance(bundle, dict) or not required.issubset(bundle):
+        raise ModelNotReadyError(f"{label} artifact is missing required components.")
+    columns = PRAAT_COLUMNS if columns is None else columns
+    if bundle["feature_columns"] != columns:
+        raise ModelNotReadyError(f"{label} artifact has an invalid feature schema.")
+    metadata = bundle["metadata"]
+    if not isinstance(metadata, dict) or metadata.get("model_version") != version:
+        raise ModelNotReadyError(f"{label} artifact has unsupported model metadata.")
+    if len(bundle["feature_min"]) != len(columns) or len(bundle["feature_max"]) != len(columns):
+        raise ModelNotReadyError(f"{label} artifact has an invalid training range.")
+    return bundle
+
+
+def _praat_rows(features: Any, bundle: dict[str, Any]) -> np.ndarray:
+    if isinstance(features, Mapping):
+        if tuple(features.keys()) != tuple(VOICE_FEATURE_COLUMNS):
+            raise ValueError("Voice feature names/order do not match the model schema.")
+        features = [list(features.values())]
+    try:
+        rows = np.asarray(features, dtype=np.float64)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Voice features must contain numeric values.") from exc
+    if rows.ndim != 2 or rows.shape[1] != len(VOICE_FEATURE_COLUMNS):
+        raise ValueError(f"Voice features must have {len(VOICE_FEATURE_COLUMNS)} columns.")
+    # Only the 13 Praat columns are model inputs; RPDE/DFA/PPE may be missing.
+    matrix = require_finite_matrix(
+        rows[:, :len(PRAAT_COLUMNS)], name="Voice features", columns=len(PRAAT_COLUMNS)
+    )
+    return np.clip(matrix, bundle["feature_min"], bundle["feature_max"])
+
+
+def load_voice_model(artifact_path: str) -> dict[str, Any]:
+    bundle = _load_pipeline_bundle(artifact_path, VOICE_MODEL_VERSION, "Voice severity model")
+    if bundle["metadata"].get("target") != "motor_UPDRS" or not hasattr(bundle["model"], "predict"):
+        raise ModelNotReadyError("Voice severity model has an unsupported target.")
+    return bundle
 
 
 def predict_voice_features(features: Any, artifact_path: str) -> np.ndarray:
-    """Predict motor_UPDRS from precomputed, ordered 16-feature voice rows."""
+    """Predict motor_UPDRS from ordered 16-feature voice rows (13 Praat columns used)."""
     bundle = load_voice_model(artifact_path)
-    if isinstance(features, Mapping):
-        if tuple(features.keys()) != tuple(bundle["feature_columns"]):
-            raise ValueError("Voice feature names/order do not match the model schema.")
-        features = [list(features.values())]
-    matrix = require_finite_matrix(
-        features, name="Voice features", columns=len(bundle["feature_columns"])
-    )
-    scaled = bundle["scaler"].transform(matrix)
-    predictions = np.asarray(bundle["model"].predict(scaled), dtype=np.float64)
+    matrix = _praat_rows(features, bundle)
+    predictions = np.asarray(bundle["model"].predict(matrix), dtype=np.float64)
     if predictions.shape != (len(matrix),) or not np.isfinite(predictions).all():
         raise RuntimeError("Voice model returned invalid predictions.")
-    return predictions
+    return np.clip(predictions, 0.0, 108.0)
+
+
+def voice_model_mae(artifact_path: str) -> float | None:
+    mae = load_voice_model(artifact_path)["metadata"].get("mae")
+    return float(mae) if isinstance(mae, (int, float)) else None
 
 
 def predict_voice_audio(*_args: Any, **_kwargs: Any) -> np.ndarray:
@@ -97,7 +111,9 @@ def _load_fusion_model(artifacts_dir: str) -> tuple[Any, Any, list[str]]:
     checkpoint_path = os.path.join(artifacts_dir, "fusion_model.pt")
     scaler_path = os.path.join(artifacts_dir, "fusion_vocal_scaler.joblib")
     if not os.path.isfile(checkpoint_path) or not os.path.isfile(scaler_path):
-        raise ModelNotReadyError("Fusion model checkpoint or scaler is unavailable.")
+        raise ModelNotReadyError(
+            "Fusion inference is unavailable because the fusion model checkpoint or scaler is unavailable."
+        )
     try:
         import torch
 
@@ -177,3 +193,90 @@ def predict_fusion_features(
     if predictions.shape != (len(vocal),) or not np.isfinite(predictions).all():
         raise RuntimeError("Fusion model returned invalid predictions.")
     return predictions
+
+
+PD_CLASSIFIER_VERSION = "logistic-pd-screen-v3"
+AUDIO_CLASSIFIER_VERSION = "rf-spectral-pd-screen-v4"
+
+# Approximate motor-severity bands for UPDRS Part III (Martínez-Martín et al.,
+# 2015 cut-offs: mild <= 32, moderate 33-58, severe >= 59). These are severity
+# bands, not Hoehn & Yahr stages.
+UPDRS_SEVERITY_BANDS = (
+    (32.0, "Mild"),
+    (58.0, "Moderate"),
+    (float("inf"), "Severe"),
+)
+UPDRS_MOTOR_MAX = 108.0
+
+
+def updrs_severity_band(score: float) -> str:
+    for upper, label in UPDRS_SEVERITY_BANDS:
+        if score <= upper:
+            return label
+    return UPDRS_SEVERITY_BANDS[-1][1]
+
+
+def _check_screening_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
+    metadata = bundle["metadata"]
+    if not hasattr(bundle["model"], "predict_proba"):
+        raise ModelNotReadyError("Screening classifier does not provide probabilities.")
+    low, high = metadata.get("low_threshold"), metadata.get("high_threshold")
+    if not (isinstance(low, float) and isinstance(high, float) and 0 < low < high < 1):
+        raise ModelNotReadyError("Screening classifier has invalid decision thresholds.")
+    return bundle
+
+
+def load_pd_classifier(artifact_path: str) -> dict[str, Any]:
+    """Screening model for submitted lab-style feature values (13 Praat measures)."""
+    return _check_screening_bundle(
+        _load_pipeline_bundle(artifact_path, PD_CLASSIFIER_VERSION, "Parkinson's screening classifier")
+    )
+
+
+def load_audio_classifier(artifact_path: str) -> dict[str, Any]:
+    """Screening model for recorded audio (spectral/cepstral measures)."""
+    return _check_screening_bundle(_load_pipeline_bundle(
+        artifact_path, AUDIO_CLASSIFIER_VERSION, "Audio screening classifier",
+        list(SPECTRAL_FEATURE_COLUMNS),
+    ))
+
+
+def screening_tier(probability: float, low: float, high: float) -> str:
+    if probability >= high:
+        return "detected"
+    if probability < low:
+        return "not_detected"
+    return "inconclusive"
+
+
+def predict_pd_screening(features: Any, artifact_path: str) -> dict[str, Any]:
+    """Screen one 16-feature lab-style row; returns probability, tier, thresholds and error rates."""
+    bundle = load_pd_classifier(artifact_path)
+    return _screen(bundle, _praat_rows(features, bundle))
+
+
+def predict_pd_screening_audio(spectral: Mapping[str, Any], artifact_path: str) -> dict[str, Any]:
+    """Screen one recording from its spectral measures (see SPECTRAL_FEATURE_COLUMNS)."""
+    bundle = load_audio_classifier(artifact_path)
+    try:
+        row = [[float(spectral[column]) for column in SPECTRAL_FEATURE_COLUMNS]]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Spectral voice measures are missing or invalid.") from exc
+    matrix = require_finite_matrix(row, name="Spectral features", columns=len(SPECTRAL_FEATURE_COLUMNS))
+    return _screen(bundle, np.clip(matrix, bundle["feature_min"], bundle["feature_max"]))
+
+
+def _screen(bundle: dict[str, Any], matrix: np.ndarray) -> dict[str, Any]:
+    probability = float(bundle["model"].predict_proba(matrix)[0, 1])
+    if not np.isfinite(probability):
+        raise RuntimeError("Screening classifier returned an invalid probability.")
+    metadata = bundle["metadata"]
+    low, high = float(metadata["low_threshold"]), float(metadata["high_threshold"])
+    return {
+        "model_version": metadata["model_version"],
+        "probability": probability,
+        "tier": screening_tier(probability, low, high),
+        "low_threshold": low,
+        "high_threshold": high,
+        "tier_rates": metadata.get("tier_rates"),
+    }

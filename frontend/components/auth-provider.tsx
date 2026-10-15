@@ -8,6 +8,7 @@ type AuthContextType = {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  googleSignIn: (credential: string) => Promise<void>;
   register: (email: string, password: string, displayName?: string) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -43,7 +44,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(me);
   };
 
-  const register = async (email: string, password: string, displayName?: string) => {
+  const googleSignIn = async (credential: string) => {
+    const me = await api.googleLogin(credential);
+    setUser(me);
+  };
+
+  const register = async (email: string, password: string, _displayName?: string) => {
     const me = await api.register(email, password);
     // displayName handling is backend‑side; we just set returned user
     setUser(me);
@@ -59,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, register, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, googleSignIn, register, signOut }}>
       {children}
     </AuthContext.Provider>
   );

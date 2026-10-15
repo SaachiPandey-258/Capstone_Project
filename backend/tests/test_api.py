@@ -5,11 +5,13 @@ import joblib
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from backend import app as api
-from scripts.feature_contract import VOICE_FEATURE_COLUMNS
+from scripts.feature_contract import SPECTRAL_FEATURE_COLUMNS, VOICE_FEATURE_COLUMNS
 
 
 @pytest.fixture
@@ -54,20 +56,19 @@ def wav_voice_file():
 def write_voice_artifact(directory):
     directory.mkdir(parents=True, exist_ok=True)
     features = np.arange(64, dtype=np.float64).reshape(4, 16)
-    scaler = StandardScaler().fit(features)
-    model = RandomForestRegressor(n_estimators=2, random_state=1).fit(
-        scaler.transform(features), np.arange(4, dtype=np.float64)
-    )
-    path = directory / "baseline_rf_model.pkl"
+    praat = features[:, :13]
+    model = make_pipeline(StandardScaler(), Ridge()).fit(praat, np.arange(4, dtype=np.float64))
     joblib.dump({
         "model": model,
-        "scaler": scaler,
-        "feature_columns": list(VOICE_FEATURE_COLUMNS),
+        "feature_columns": list(VOICE_FEATURE_COLUMNS[:13]),
+        "feature_min": praat.min(axis=0).tolist(),
+        "feature_max": praat.max(axis=0).tolist(),
         "metadata": {
-            "model_version": "random-forest-updrs-v1",
+            "model_version": "ridge-log-updrs-v2",
             "target": "motor_UPDRS",
+            "mae": 7.0,
         },
-    }, path)
+    }, directory / "updrs_regressor.pkl")
     return features
 
 
@@ -87,7 +88,7 @@ def test_registration_login_and_expired_or_missing_session(client):
         "/api/auth/register", json={"email": "person@example.org", "password": "another-password"}
     ).status_code == 409
     with api.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 5
         indexes = {
             row["name"]
             for row in db.execute("PRAGMA index_list('assessments')").fetchall()
@@ -106,7 +107,7 @@ def test_model_status_and_precomputed_inference_are_separate_from_audio_uploads(
         "artifact_available": False,
         "precomputed_features_supported": True,
         "raw_audio_inference_available": True,
-        "reason": "Voice model artifact is unavailable.",
+        "reason": "Voice severity model artifact is unavailable.",
     }
     assert client.post(
         "/api/research/predict-voice-features",
@@ -215,10 +216,72 @@ def test_voice_wav_extracts_persists_features_and_report(client, tmp_path):
     assert response.status_code == 201, response.text
     record = response.json()
     assert record["status"] == "completed"
-    assert list(record["extracted_features"]) == list(VOICE_FEATURE_COLUMNS)
-    assert record["extraction_version"] == "audio-extractor-v1"
+    assert list(record["extracted_features"])[:16] == list(VOICE_FEATURE_COLUMNS)
+    assert set(SPECTRAL_FEATURE_COLUMNS) <= set(record["extracted_features"])
+    assert record["extraction_version"] == "audio-extractor-v4"
     assert record["quality"]["quality_status"] == "validated"
     assert record["result"]["is_diagnostic"] is False
+
+
+def write_audio_screening_artifact(directory):
+    from sklearn.ensemble import RandomForestClassifier
+
+    directory.mkdir(parents=True, exist_ok=True)
+    features = np.random.default_rng(0).normal(size=(8, len(SPECTRAL_FEATURE_COLUMNS)))
+    model = RandomForestClassifier(n_estimators=5, random_state=0).fit(features, [0, 1] * 4)
+    joblib.dump({
+        "model": model,
+        "feature_columns": list(SPECTRAL_FEATURE_COLUMNS),
+        "feature_min": features.min(axis=0).tolist(),
+        "feature_max": features.max(axis=0).tolist(),
+        "metadata": {"model_version": "rf-spectral-pd-screen-v4", "low_threshold": 0.44, "high_threshold": 0.61},
+    }, directory / "pd_audio_classifier.pkl")
+
+
+def test_recorded_audio_uses_the_audio_screening_model(client, tmp_path):
+    token = create_account(client)
+    write_voice_artifact(tmp_path / "models")
+    write_screening_artifact(tmp_path / "models")
+    write_audio_screening_artifact(tmp_path / "models")
+    status = client.get("/api/models/status").json()["screening"]
+    assert status["artifact_available"] and status["audio_artifact_available"]
+    response = client.post(
+        "/api/assessments",
+        headers=auth(token),
+        data={"consent": "true", "modality": "voice", "duration_seconds": "5"},
+        files={"voice": wav_voice_file()},
+    )
+    result = response.json()["result"]
+    assert result["screening_model"] == "rf-spectral-pd-screen-v4"
+    assert result["screening_tier"] in {"detected", "inconclusive", "not_detected"}
+    assert result["pd_low_threshold"] == 0.44
+
+
+def test_mostly_unvoiced_recording_is_rejected_without_a_score(client, tmp_path):
+    token = create_account(client)
+    write_voice_artifact(tmp_path / "models")
+    sample_rate = 16_000
+    rng = np.random.default_rng(0)
+    samples = 0.01 * rng.standard_normal(sample_rate * 5)
+    time = np.arange(int(sample_rate * 0.4)) / sample_rate
+    samples[sample_rate:sample_rate + time.size] += 0.2 * np.sin(2 * np.pi * 150 * time)
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes((samples * 32767).astype("<i2").tobytes())
+    response = client.post(
+        "/api/assessments",
+        headers=auth(token),
+        data={"consent": "true", "modality": "voice", "duration_seconds": "5"},
+        files={"voice": ("voice.wav", output.getvalue(), "audio/wav")},
+    )
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["status"] == "validation_required"
+    assert record["result"] is None
+    assert "steady voice" in record["unavailable_reason"]
 
 
 def test_manual_voice_features_persist_exploratory_report(client, tmp_path):
@@ -240,6 +303,88 @@ def test_manual_voice_features_persist_exploratory_report(client, tmp_path):
     assert record["result"]["is_diagnostic"] is False
     assert "Exploratory research estimate" in record["result"]["summary"]
     assert client.get(f"/api/reports/{record['id']}", headers=auth(token)).json() == record
+
+
+def write_screening_artifact(directory):
+    directory.mkdir(parents=True, exist_ok=True)
+    features = np.arange(64, dtype=np.float64).reshape(4, 16)
+    screening = features[:, :13]
+    model = make_pipeline(StandardScaler(), LogisticRegression()).fit(screening, [0, 0, 1, 1])
+    joblib.dump({
+        "model": model,
+        "feature_columns": list(VOICE_FEATURE_COLUMNS[:13]),
+        "feature_min": screening.min(axis=0).tolist(),
+        "feature_max": screening.max(axis=0).tolist(),
+        "metadata": {
+            "model_version": "logistic-pd-screen-v3",
+            "low_threshold": 0.35,
+            "high_threshold": 0.7,
+            "tier_rates": {"healthy_detected": 0.11},
+        },
+    }, directory / "pd_classifier.pkl")
+    return features
+
+
+def test_report_includes_patient_details_screening_and_severity(client, tmp_path):
+    token = create_account(client)
+    write_voice_artifact(tmp_path / "models")
+    features = write_screening_artifact(tmp_path / "models")
+    data = {
+        "consent": "true",
+        "modality": "voice",
+        "feature_columns": json.dumps(list(VOICE_FEATURE_COLUMNS)),
+        "features": json.dumps(features[3].tolist()),
+        "patient_name": "  Asha Rao ",
+        "patient_age": "64",
+        "patient_sex": "female",
+        "patient_location": "Mumbai, India",
+    }
+    response = client.post("/api/assessments/manual", headers=auth(token), data=data)
+    assert response.status_code == 201, response.text
+    record = response.json()
+    assert record["patient"] == {
+        "full_name": "Asha Rao", "age": 64, "sex": "female", "location": "Mumbai, India",
+    }
+    result = record["result"]
+    assert result["screening_tier"] == "detected" and result["pd_detected"] is True
+    assert 0.7 <= result["pd_probability"] <= 1
+    assert result["pd_low_threshold"] == 0.35 and result["pd_high_threshold"] == 0.7
+    assert result["screening_error_rates"] == {"healthy_detected": 0.11}
+    assert result["severity_band"] == "Mild" and result["updrs_scale_max"] == 108
+    assert result["prediction_mae"] == 7.0
+
+    response = client.post(
+        "/api/assessments/manual",
+        headers=auth(token),
+        data={**data, "features": json.dumps(features[0].tolist())},
+    )
+    assert response.json()["result"]["screening_tier"] == "not_detected"
+    assert response.json()["result"]["pd_detected"] is False
+    assert list(record["extracted_features"]) == list(VOICE_FEATURE_COLUMNS)
+
+    response = client.post(
+        "/api/assessments/manual", headers=auth(token), data={**data, "patient_age": "400"}
+    )
+    assert response.status_code == 422
+
+
+def test_assessment_delete_removes_record_and_files_for_owner_only(client, tmp_path):
+    owner = create_account(client)
+    other = create_account(client, "other@example.org")
+    write_voice_artifact(tmp_path / "models")
+    record = client.post(
+        "/api/assessments",
+        headers=auth(owner),
+        data={"consent": "true", "modality": "voice", "duration_seconds": "5"},
+        files={"voice": wav_voice_file()},
+    ).json()
+    uploads = list((tmp_path / "uploads").rglob(f"{record['id']}-*"))
+    assert uploads
+    assert client.delete(f"/api/assessments/{record['id']}", headers=auth(other)).status_code == 404
+    assert client.delete(f"/api/assessments/{record['id']}", headers=auth(owner)).status_code == 204
+    assert not any(path.exists() for path in uploads)
+    assert client.get(f"/api/assessments/{record['id']}", headers=auth(owner)).status_code == 404
+    assert client.delete(f"/api/assessments/{record['id']}", headers=auth(owner)).status_code == 404
 
 
 def test_fusion_requires_gait_and_rejects_bad_duration_or_audio(client):
@@ -303,10 +448,11 @@ def test_specialist_search_returns_real_provider_payload_and_requires_coordinate
         "providers": [{
             "id": "node/123",
             "name": "Community Neurology",
+            "listing_type": "Doctor / specialist",
             "address": None,
             "latitude": 45.5,
             "longitude": -122.6,
-            "distance_miles": 1.2,
+            "distance_km": 1.2,
             "website": None,
             "phone": None,
             "osm_url": "https://www.openstreetmap.org/node/123",
@@ -327,11 +473,22 @@ def test_specialist_search_returns_real_provider_payload_and_requires_coordinate
     assert response.status_code == 200
     assert response.json() == providers
     assert calls == [("Portland", "neurology", 25, 45.5, -122.6)]
+    broad_search = client.get(
+        "/api/specialists?location=Navi%20Mumbai&category=parkinsons-care&radius=250",
+        headers=auth(token),
+    )
+    assert broad_search.status_code == 200
+    assert calls[-1] == ("Navi Mumbai", "parkinsons-care", 250, None, None)
     mismatched_coordinates = client.get(
         "/api/specialists?location=Portland&category=neurology&radius=25&latitude=45.5",
         headers=auth(token),
     )
     assert mismatched_coordinates.status_code == 422
+    oversized_radius = client.get(
+        "/api/specialists?location=Portland&category=parkinsons-care&radius=501",
+        headers=auth(token),
+    )
+    assert oversized_radius.status_code == 422
 
 
 def test_specialist_search_surfaces_provider_failure_without_fake_results(
