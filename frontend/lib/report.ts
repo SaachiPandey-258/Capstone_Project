@@ -52,6 +52,7 @@ export function assessmentRows(report: Assessment): [string, string][] {
     ["Assessment date", formatDateTime(report.created_at)],
     ["Input pathway", report.modality === "voice_gait" ? "Voice + gait" : "Voice only"],
     ["Voice source", fromAudio ? `Audio recording (${report.duration_seconds} s), features extracted automatically` : "Submitted acoustic feature values"],
+    ...gaitSourceRow(report),
     ["Severity model", modelLabel(report.result?.model)],
     ["Screening model", report.result?.screening_basis === "voice_gait" && report.result.voice_screening && report.result.gait_screening
       ? `Combined: ${modelLabel(report.result.voice_screening.model)} + ${modelLabel(report.result.gait_screening.model)}`
@@ -175,4 +176,12 @@ export function gaitRows(report: Assessment): [string, string][] {
   const features = report.result?.gait_features;
   if (!features) return [];
   return Object.entries(features).map(([name, value]) => [name, Number(value).toPrecision(4)]);
+}
+
+function gaitSourceRow(report: Assessment): [string, string][] {
+  const gait = report.files.find((file) => file.kind === "gait");
+  if (!gait) return [];
+  return [["Walking recording", gait.name.startsWith("sample-")
+    ? `Sample from the PhysioNet gait dataset (${gait.name}), not the participant’s own walking`
+    : `${gait.name}${gait.validated_rows ? ` · ${gait.validated_rows.toLocaleString()} rows` : ""}`]];
 }

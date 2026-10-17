@@ -268,6 +268,20 @@ describe("assessment history and submission journey", () => {
     expect(onDelete).toHaveBeenCalledWith("assessment-1");
   });
 
+  it("explains gait and loads a sample walking recording for voice + gait", async () => {
+    const sample = Array.from({ length: 220 }, (_, row) => [row / 100, ...Array(18).fill(10)].join("\t")).join("\n");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob([sample], { type: "text/plain" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<AssessmentWizard />);
+    expect(screen.getByText("What is gait, and why does it matter?")).toBeInTheDocument();
+    expect(screen.getByText("Complete assessment")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Voice and gait assessment"));
+    await user.click(screen.getByRole("button", { name: /Sample walk: person with Parkinson’s/ }));
+    expect(fetchMock).toHaveBeenCalledWith("/samples/sample-walk-parkinsons-GaPt03.txt");
+    expect(await screen.findByText(/Using sample: sample-walk-parkinsons-GaPt03.txt/)).toBeInTheDocument();
+  });
+
   it("opens the report directly after a completed submission", async () => {
     vi.spyOn(api, "modelAvailability").mockResolvedValue({
       voice: { artifact_available: true, precomputed_features_supported: true, raw_audio_inference_available: true, reason: null },

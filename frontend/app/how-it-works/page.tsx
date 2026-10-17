@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, AudioWaveform, FileText, Gauge, LineChart, Mic, ShieldCheck } from "lucide-react";
 import { MedicalDisclaimer } from "@/components/medical-disclaimer";
+import { GaitInfo } from "@/components/gait-info";
 
 const PIPELINE = [
   { icon: Mic, title: "Record", body: "A steady “aaah” for 5–10 seconds in your browser, or upload an audio file." },
@@ -48,6 +49,11 @@ export default function HowItWorksPage() {
           </ul>
           <p className="muted">It is a research screening aid with modest accuracy — not a medical device.</p>
         </article>
+      </section>
+
+      <section className="explain-card gait-explain">
+        <h2>Voice + gait: the optional walking assessment</h2>
+        <GaitInfo open />
       </section>
 
       <div className="button-row">
