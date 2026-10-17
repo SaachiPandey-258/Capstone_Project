@@ -18,6 +18,7 @@ import {
   featureRows,
   gaitRows,
   tierLabel,
+  NEXT_STEP_TEXT,
   formatDateTime,
   LIMITATIONS,
   participantRows,
@@ -155,6 +156,7 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
             </View>
           </View>
           <Text style={styles.interpretation}>Interpretation. {findings.interpretation}</Text>
+          {findings.tier && <Text style={[styles.interpretation, { marginTop: 6 }]}>What to do next. {NEXT_STEP_TEXT[findings.tier]}</Text>}
         </View>
 
         {features.length > 0 && <View style={styles.section} wrap={false}>

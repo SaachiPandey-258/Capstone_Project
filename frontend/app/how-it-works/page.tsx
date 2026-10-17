@@ -58,6 +58,7 @@ export default function HowItWorksPage() {
 
       <div className="button-row">
         <Link className="button" href="/guide">Read the recording guide <ArrowRight size={17} /></Link>
+        <Link className="button button-outline" href="/next-steps">Next steps &amp; care</Link>
         <Link className="text-link" href="/resources">Explore resources <ArrowRight size={16} /></Link>
       </div>
       <MedicalDisclaimer />

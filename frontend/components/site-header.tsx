@@ -11,6 +11,7 @@ const publicLinks = [
   ["/about", "About"],
   ["/how-it-works", "How it works"],
   ["/guide", "Recording guide"],
+  ["/next-steps", "Next steps & care"],
   ["/resources", "Resources"],
 ];
 const privateLinks = [

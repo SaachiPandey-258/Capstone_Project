@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { ArrowUpRight, ExternalLink, Globe, LocateFixed, MapPin, Navigation, Phone, Search } from "lucide-react";
@@ -17,6 +18,17 @@ const CareMap = dynamic(() => import("@/components/care-map"), {
   ssr: false,
   loading: () => <div className="care-map care-map-loading" aria-hidden="true" />,
 });
+
+const CATEGORIES: SpecialistSearch["category"][] = ["parkinsons-care", "neurology", "movement-disorders", "hospitals-clinics", "physical-therapy", "organizations"];
+
+/** Lets other pages link here with a care type pre-selected, e.g. /specialists?category=neurology. */
+function CategoryFromUrl({ onCategory }: { onCategory: (category: SpecialistSearch["category"]) => void }) {
+  const requested = useSearchParams().get("category");
+  useEffect(() => {
+    if (requested && CATEGORIES.includes(requested as SpecialistSearch["category"])) onCategory(requested as SpecialistSearch["category"]);
+  }, [requested, onCategory]);
+  return null;
+}
 
 const QUICK_CITIES = ["Mumbai", "Delhi", "Bengaluru", "Pune", "Hyderabad", "Chennai", "Kolkata"];
 
@@ -97,6 +109,7 @@ function SpecialistSearchPage() {
   }
 
   return <main className="private-page content-width">
+    <Suspense fallback={null}><CategoryFromUrl onCategory={setCategory} /></Suspense>
     <PageHeading eyebrow="Care directory · India" title="Find Parkinson’s-related care">
       Search hospitals, neurologists, clinics, physiotherapy and support organisations near you. Listings come from OpenStreetMap and may not be Parkinson’s-specific — always confirm services directly.
     </PageHeading>
@@ -104,7 +117,7 @@ function SpecialistSearchPage() {
       <form className="specialist-form" onSubmit={(event) => { event.preventDefault(); void runSearch(location); }}>
         <div className="location-field"><label htmlFor="location">City, area or PIN code</label><div className="input-with-icon"><MapPin size={18} aria-hidden="true" /><input id="location" autoComplete="off" value={location} onChange={(event) => { setLocation(event.target.value); setCoordinates(null); reset(); }} placeholder="e.g. Andheri, Mumbai or 411001" /></div></div>
         <button className="button button-outline geo-button" type="button" onClick={useLocation}><LocateFixed size={17} /> Use my location</button>
-        <div><label htmlFor="category">Care type</label><select id="category" value={category} onChange={(event) => { setCategory(event.target.value as SpecialistSearch["category"]); reset(); }}><option value="parkinsons-care">Parkinson’s-related care & organisations</option><option value="neurology">Neurology & doctors</option><option value="movement-disorders">Movement disorders & Parkinson’s</option><option value="hospitals-clinics">Hospitals & clinics</option><option value="physical-therapy">Physiotherapy & rehabilitation</option><option value="organizations">Organisations & NGOs</option></select></div>
+        <div><label htmlFor="category">Care type</label><select id="category" value={category} onChange={(event) => { setCategory(event.target.value as SpecialistSearch["category"]); reset(); }}><option value="parkinsons-care">All Parkinson’s care</option><option value="neurology">Neurologists & doctors</option><option value="movement-disorders">Movement disorders</option><option value="hospitals-clinics">Hospitals & clinics</option><option value="physical-therapy">Physiotherapy & rehab</option><option value="organizations">Support organisations</option></select></div>
         <div><label htmlFor="radius">Search radius</label><select id="radius" value={radius} onChange={(event) => { setRadius(event.target.value); reset(); }}><option value="5">5 km</option><option value="10">10 km</option><option value="25">25 km</option><option value="50">50 km</option><option value="100">100 km</option><option value="250">250 km</option><option value="500">500 km</option></select></div>
         <button className="button" type="submit" disabled={searching}><Search size={17} />{searching ? "Searching…" : "Search"}</button>
       </form>

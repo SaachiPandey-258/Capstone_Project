@@ -11,6 +11,7 @@ import { ProgressView } from "@/components/progress-view";
 import { ReportView } from "@/components/report-view";
 import { AssessmentList } from "@/components/assessment-list";
 import SpecialistsPage from "@/app/specialists/page";
+import NextStepsPage from "@/app/next-steps/page";
 import { parseVoiceFeatureDataset, previewGaitText, validateGaitFile, validateVoiceDuration, validateVoiceFile, hasValidFusionInputs } from "@/lib/assessment";
 import { specialistUnavailableMessage, validateSpecialistLocation } from "@/lib/specialists";
 import type { Assessment, User } from "@/lib/types";
@@ -36,6 +37,7 @@ vi.mock("@/components/care-map", () => ({ default: () => <div data-testid="care-
 vi.mock("next/navigation", () => ({
   usePathname: () => "/",
   useRouter: () => ({ replace, push }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 const unavailable: Assessment = {
@@ -479,6 +481,21 @@ describe("reports and progress analytics", () => {
     expect(screen.getByRole("heading", { name: /Gait measurements/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /Participant information/ })).toBeInTheDocument();
     expect(screen.queryByText(/patient/i)).not.toBeInTheDocument();
+  });
+
+  it("tells the participant what to do next and links to a neurologist search", () => {
+    render(<ReportView report={{ ...unavailable, status: "completed", unavailable_reason: "", result: { prediction: 20, screening_tier: "detected", pd_probability: 0.8, pd_low_threshold: 0.44, pd_high_threshold: 0.61 } }} />);
+    expect(screen.getByText(/Book an appointment with a neurologist/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Find a neurologist near you/ })).toHaveAttribute("href", "/specialists?category=neurology");
+    expect(screen.getByRole("link", { name: /Next steps & care/ })).toHaveAttribute("href", "/next-steps#detected");
+  });
+
+  it("explains care, diagnosis and why a result can change without implying a cure", () => {
+    render(<NextStepsPage />);
+    expect(screen.getByRole("heading", { name: /Can a “Detected” result change to “Not detected”\?/ })).toBeInTheDocument();
+    expect(screen.getByText(/not that Parkinson’s has gone/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Medicines" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /Find a neurologist near you/ })[0]).toHaveAttribute("href", "/specialists?category=neurology");
   });
 
   it("explains why an empty progress history cannot show a trend", () => {

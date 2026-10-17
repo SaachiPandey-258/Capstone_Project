@@ -185,3 +185,15 @@ function gaitSourceRow(report: Assessment): [string, string][] {
     ? `Sample from the PhysioNet gait dataset (${gait.name}), not the participant’s own walking`
     : `${gait.name}${gait.validated_rows ? ` · ${gait.validated_rows.toLocaleString()} rows` : ""}`]];
 }
+
+export const NEXT_STEP_TEXT: Record<ScreeningTier, string> = {
+  detected: "Book an appointment with a neurologist (ideally a movement-disorder specialist) and take this report. Do not start, stop or change any medicine because of this screen.",
+  inconclusive: "Record again on another day in a quiet room. If results stay inconclusive, or you have symptoms such as tremor, slowness, stiffness or a softer voice, discuss them with a doctor.",
+  not_detected: "No markers were found in this recording, but a screen cannot rule Parkinson’s out. See a doctor about any symptoms, and repeat the assessment every few months to track change.",
+};
+
+export const NEXT_STEP_ANCHOR: Record<ScreeningTier, string> = {
+  detected: "detected",
+  inconclusive: "inconclusive",
+  not_detected: "not-detected",
+};

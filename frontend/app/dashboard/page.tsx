@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, BookOpen, CalendarDays, ClipboardCheck, Files, LineChart, MapPinned, Mic } from "lucide-react";
+import { ArrowRight, BookOpen, CalendarDays, ClipboardCheck, Files, HeartPulse, MapPinned, Mic } from "lucide-react";
 import { RequireAuth } from "@/components/require-auth";
 import { AssessmentList } from "@/components/assessment-list";
 import { VoiceIllustration } from "@/components/illustrations";
@@ -15,8 +15,8 @@ import type { Dashboard } from "@/lib/types";
 const ACTIONS = [
   { href: "/assessment/new", icon: Mic, title: "New assessment", body: "Record a 5–10 second “aaah”." },
   { href: "/guide", icon: BookOpen, title: "Recording guide", body: "Tips and a live microphone check." },
-  { href: "/progress", icon: LineChart, title: "Progress", body: "See how your measures change." },
-  { href: "/specialists", icon: MapPinned, title: "Find care", body: "Neurologists and clinics near you." },
+  { href: "/next-steps", icon: HeartPulse, title: "Next steps & care", body: "What to do after a result." },
+  { href: "/specialists?category=neurology", icon: MapPinned, title: "Find a neurologist", body: "Neurologists and clinics near you." },
 ];
 
 function DashboardContent() {

@@ -1,4 +1,6 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
+import { MapPinned } from "lucide-react";
 import type { Assessment } from "@/lib/types";
 import { SeverityGauge, UPDRS_BANDS } from "@/components/severity-gauge";
 import { BrandMark } from "@/components/brand-logo";
@@ -13,6 +15,8 @@ import {
   reportNumber,
   SEVERITY_NOTE,
   tierLabel,
+  NEXT_STEP_ANCHOR,
+  NEXT_STEP_TEXT,
 } from "@/lib/report";
 
 export function ReportView({ report }: { report: Assessment }) {
@@ -85,6 +89,14 @@ export function ReportView({ report }: { report: Assessment }) {
         </div>
       </div>
       <p className="formal-interpretation"><strong>Interpretation.</strong> {findings.interpretation}</p>
+      {findings.tier && <div className={`next-step-box tone-${findings.tier}`}>
+        <div><strong>What to do next.</strong> {NEXT_STEP_TEXT[findings.tier]}</div>
+        <div className="next-step-actions">
+          <Link className="button button-small" href="/specialists?category=neurology"><MapPinned size={15} /> Find a neurologist near you</Link>
+          <Link className="button button-small button-outline" href={`/next-steps#${NEXT_STEP_ANCHOR[findings.tier]}`}>Next steps &amp; care</Link>
+          <Link className="text-link" href="/next-steps#can-it-change">Can this result change?</Link>
+        </div>
+      </div>}
       {report.result?.screening_unavailable_reason && <p className="field-hint">Screening unavailable: {String(report.result.screening_unavailable_reason)}</p>}
     </section>
 

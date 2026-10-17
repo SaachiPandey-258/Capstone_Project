@@ -260,6 +260,7 @@ start.command / start.bat
 | **Reports** (`/reports`) | All completed reports as cards; illustrated empty state |
 | **Progress** (`/progress`) | Screening probability over time on coloured tier bands; selectable voice-measure trend (CPPS, pitch SD, HNR, jitter, shimmer); summary cards. Replaces the old “Analytics” page (`/analytics` redirects) |
 | **Find care** (`/specialists`) | India-only search by city/area/PIN, quick city chips, care-type and radius filters, **interactive Leaflet map** with colour-coded markers synced to result list, Directions (Google Maps), OSM links, national centres panel (PDMDS, NIMHANS, AIIMS, WHO) |
+| **Next steps & care** (`/next-steps`) | Public page: what to do for each result (Detected / Inconclusive / Not detected, with anchors linked from reports), the care journey after seeing a doctor (referral → clinical assessment → MDS-criteria diagnosis, MRI/DaT scan where needed → care plan → treatment → reviews), how Parkinson’s is managed (medicines such as levodopa, speech therapy incl. LSVT LOUD, physiotherapy & exercise, occupational therapy, DBS, mood/sleep support), and **“Can a Detected result change to Not detected?”** (recording variation, false alarms ~1 in 7, treatment improving symptoms, medicine on/off timing — never that Parkinson’s has gone). Sources: WHO, NICE NG71, Postuma 2015 MDS criteria, LSVT Global, PDMDS |
 | **Recording guide** (`/guide`) | Animated 4-step tutorial carousel (auto-play with progress dots) + **live microphone check** (too quiet / good / too loud), do's and don'ts |
 | **How it works** (`/how-it-works`) | Animated 6-step pipeline, meaning of each result tier, accuracy figures |
 | **About / Resources** | Project approach and curated resources |
@@ -280,6 +281,8 @@ start.command / start.bat
 | Screening accuracy on phone audio | AUC 0.475; 72% of healthy flagged | AUC 0.782; 13% of healthy flagged |
 | Voice + gait | Two separate outputs: voice gave the verdict, gait only fed the severity number | **One combined verdict** from a new gait screening model + voice model (late fusion), with both parts shown |
 | Gait input | Raw 19-column file only, no explanation | Plain-language “What is gait?” panel (wizard + How it works), one-click sample walking recordings, own-file upload in an expandable section |
+| After a result | Report ended at the verdict | Tier-specific “What to do next” box on every report (and PDF) with **Find a neurologist near you** (opens Find care with Neurologists pre-selected) and **Next steps & care** buttons |
+| Find care form | Controls of different heights; care-type text cut off; location button not full-width on phones | Equal-height controls, shorter care-type labels, full-width buttons on phones; `?category=` link pre-selects the care type |
 | Wording | “Patient” throughout | “Participant” (results are not clinically verified) |
 | Severity model | Random forest, 16 features, R² −0.105 | Ridge on 13 log features, MAE 6.95; shown only when screening = Detected, with ± MAE |
 | Report | Key-value dump | Formal report: participant details, verdict, gauge, tables, limitations; formal PDF |
@@ -748,6 +751,9 @@ One combined verdict. A gait model (SVM on stride-timing variability and asymmet
 
 **Q: Why not train one model on voice and gait together?**
 No public dataset has both from the same people. The old fusion network paired different people by UPDRS score (leakage). Late fusion keeps each model honest on correctly labelled data. The trade-off is that the combined accuracy is a simulation assuming independent errors.
+
+**Q: Can a Detected result later become Not detected? Does that mean the person is cured?**
+The result can change because single recordings vary, because the first result was a false alarm (about 1 in 7 healthy people get Detected), because treatment such as medicines, LSVT LOUD voice therapy or physiotherapy improves voice and walking, or because of medicine on/off timing. A change after treatment shows symptoms improved — not that Parkinson’s has gone; it is a long-term condition with no current cure. The Next steps & care page explains this to users.
 
 **Q: Why do you say “participant” instead of “patient”?**
 Results are not verified by a clinician, so the person assessed is a research participant, not a diagnosed patient.
