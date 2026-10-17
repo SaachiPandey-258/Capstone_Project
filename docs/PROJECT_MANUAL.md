@@ -260,7 +260,7 @@ start.command / start.bat
 | **Reports** (`/reports`) | All completed reports as cards; illustrated empty state |
 | **Progress** (`/progress`) | Screening probability over time on coloured tier bands; selectable voice-measure trend (CPPS, pitch SD, HNR, jitter, shimmer); summary cards. Replaces the old “Analytics” page (`/analytics` redirects) |
 | **Find care** (`/specialists`) | India-only search by city/area/PIN, quick city chips, care-type and radius filters, **interactive Leaflet map** with colour-coded markers synced to result list, Directions (Google Maps), OSM links, national centres panel (PDMDS, NIMHANS, AIIMS, WHO) |
-| **Next steps & care** (`/next-steps`) | Public page: what to do for each result (Detected / Inconclusive / Not detected, with anchors linked from reports), the care journey after seeing a doctor (referral → clinical assessment → MDS-criteria diagnosis, MRI/DaT scan where needed → care plan → treatment → reviews), how Parkinson’s is managed (medicines such as levodopa, speech therapy incl. LSVT LOUD, physiotherapy & exercise, occupational therapy, DBS, mood/sleep support), and **“Can a Detected result change to Not detected?”** (recording variation, false alarms ~1 in 7, treatment improving symptoms, medicine on/off timing — never that Parkinson’s has gone). Sources: WHO, NICE NG71, Postuma 2015 MDS criteria, LSVT Global, PDMDS |
+| **Next steps & care** (`/next-steps`) | Public page with general, non-medical information: what to do for each result (anchors linked from reports), what usually happens at a neurologist visit (referral → examination → diagnosis by a doctor → care plan → reviews), who can help (care team, therapies and activity as advised by doctors, support groups/helplines), and **“Can a Detected result change to Not detected?”** (recordings vary, false alarms ~1 in 7, symptoms can change with care — never that Parkinson’s has gone). Deliberately names **no medicines or specific treatments**, as the project is not clinically verified. Sources: WHO, NICE NG71, PDMDS |
 | **Recording guide** (`/guide`) | Animated 4-step tutorial carousel (auto-play with progress dots) + **live microphone check** (too quiet / good / too loud), do's and don'ts |
 | **How it works** (`/how-it-works`) | Animated 6-step pipeline, meaning of each result tier, accuracy figures |
 | **About / Resources** | Project approach and curated resources |
@@ -283,6 +283,10 @@ start.command / start.bat
 | Gait input | Raw 19-column file only, no explanation | Plain-language “What is gait?” panel (wizard + How it works), one-click sample walking recordings, own-file upload in an expandable section |
 | After a result | Report ended at the verdict | Tier-specific “What to do next” box on every report (and PDF) with **Find a neurologist near you** (opens Find care with Neurologists pre-selected) and **Next steps & care** buttons |
 | Find care form | Controls of different heights; care-type text cut off; location button not full-width on phones | Equal-height controls, shorter care-type labels, full-width buttons on phones; `?category=` link pre-selects the care type |
+| Severity gauge | Shown for every result, greyed out as “not applicable” | Shown **only when the result is Detected** (the severity model was trained only on people with Parkinson’s, so it is meaningless otherwise) |
+| Report text | Interpretation paragraph, long model names, long limitations | Verdict-first layout; 4-row details table; one-line next step; short bullet notes |
+| Wizard text | Model-availability panel, long requirement hints, long gait descriptions | Short step descriptions; no availability panel; short sample buttons |
+| Dropdowns | Native arrows misaligned | Consistent custom arrow on every dropdown |
 | Wording | “Patient” throughout | “Participant” (results are not clinically verified) |
 | Severity model | Random forest, 16 features, R² −0.105 | Ridge on 13 log features, MAE 6.95; shown only when screening = Detected, with ± MAE |
 | Report | Key-value dump | Formal report: participant details, verdict, gauge, tables, limitations; formal PDF |
@@ -691,11 +695,14 @@ End-to-end check with repo files (lab model + fusion): PD row + `GaPt03_01` → 
 
 Report number `PD-XXXXXXXX` (first 8 hex characters of the record ID). Sections:
 
-1. Participant information
-2. Assessment details: date, pathway, voice source, severity model, screening model
-3. Findings: verdict card with probability bar over tier zones and tier error rates; UPDRS gauge with ± MAE and band legend; interpretation paragraph
+Title: “Voice Screening Report” or “Voice & Gait Screening Report”.
+
+1. Participant information (name, age, sex, location)
+2. Assessment details: date, assessment type, voice input, walking input (own recording or PhysioNet sample)
+3. Findings: verdict card (probability bar over tier zones, voice and gait parts for combined results, one accuracy line); **severity gauge only when Detected**; one-line next step with **Find a neurologist** and **Next steps & care** buttons
 4. Acoustic measurements (16 features + CPPS, F0 SD, F0 range, spectral tilt)
-5. Notes and limitations
+5. Gait measurements (voice + gait only)
+6. Notes: 3–4 short bullets (research only; error rates; severity scale when shown; models used)
 
 The PDF is generated in the browser (A4, Helvetica) with a vector gauge and page numbers.
 
@@ -753,7 +760,7 @@ One combined verdict. A gait model (SVM on stride-timing variability and asymmet
 No public dataset has both from the same people. The old fusion network paired different people by UPDRS score (leakage). Late fusion keeps each model honest on correctly labelled data. The trade-off is that the combined accuracy is a simulation assuming independent errors.
 
 **Q: Can a Detected result later become Not detected? Does that mean the person is cured?**
-The result can change because single recordings vary, because the first result was a false alarm (about 1 in 7 healthy people get Detected), because treatment such as medicines, LSVT LOUD voice therapy or physiotherapy improves voice and walking, or because of medicine on/off timing. A change after treatment shows symptoms improved — not that Parkinson’s has gone; it is a long-term condition with no current cure. The Next steps & care page explains this to users.
+The result can change because single recordings vary, because the first result was a false alarm (about 1 in 7 healthy people get Detected), or because symptoms change with care advised by doctors. A change to Not detected never means Parkinson’s has gone; it is a long-term condition. The app gives only general information here and names no medicines or treatments, because it is a student research project, not clinically verified.
 
 **Q: Why do you say “participant” instead of “patient”?**
 Results are not verified by a clinician, so the person assessed is a research participant, not a diagnosed patient.

@@ -17,7 +17,7 @@ import {
   type VoiceFeatureDatasetRow,
 } from "@/lib/assessment";
 import { canNormalizeAudio, normalizeToWav } from "@/lib/audio";
-import type { Assessment, ModelAvailability, PatientSex } from "@/lib/types";
+import type { Assessment, PatientSex } from "@/lib/types";
 import { useAuth } from "@/components/auth-provider";
 import { ErrorMessage } from "@/components/ui";
 import { GaitInfo } from "@/components/gait-info";
@@ -65,7 +65,6 @@ export function AssessmentWizard() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [result, setResult] = useState<Assessment | null>(null);
-  const [availability, setAvailability] = useState<ModelAvailability | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const meterContextRef = useRef<AudioContext | null>(null);
@@ -74,9 +73,6 @@ export function AssessmentWizard() {
   const recordingTimerRef = useRef<number | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
 
-  useEffect(() => {
-    api.modelAvailability().then(setAvailability).catch(() => setAvailability(null));
-  }, []);
 
   useEffect(() => {
     if (user?.name) setPatientName((current) => current || user.name);
@@ -401,7 +397,7 @@ export function AssessmentWizard() {
 
   return <div className="wizard">
     <section className="wizard-card">
-      <div className="wizard-step"><span>01</span><div><h2>Participant details and consent</h2><p>Details of the person being assessed. They appear on the generated report; only the name is required.</p></div></div>
+      <div className="wizard-step"><span>01</span><div><h2>Participant details and consent</h2><p>Shown on the report. Only the name is required.</p></div></div>
       <div className="patient-grid">
         <label className="patient-name">Full name<input autoComplete="name" value={patientName} onChange={(event) => setPatientName(event.target.value)} placeholder="e.g. Asha Rao" /></label>
         <label>Age<input type="number" inputMode="numeric" min="1" max="120" value={patientAge} onChange={(event) => setPatientAge(event.target.value)} placeholder="Years" /></label>
@@ -419,16 +415,16 @@ export function AssessmentWizard() {
     </section>
 
     <section className="wizard-card">
-      <div className="wizard-step"><span>02</span><div><h2>Assessment type</h2><p><strong>Voice + gait</strong> is the complete assessment: a voice sample and a walking recording are analysed separately and combined into one result. Choose <strong>Voice only</strong> when no walking recording is available.</p></div></div>
+      <div className="wizard-step"><span>02</span><div><h2>Assessment type</h2><p>Voice + gait combines both into one result.</p></div></div>
       <div className="choice-grid">
-        <label className={modality === "voice" ? "choice-card selected" : "choice-card"}><input aria-label="Voice-only assessment" type="radio" name="modality" checked={modality === "voice"} onChange={() => setModality("voice")} /><span><strong>Voice only</strong><small>Quicker — needs only a microphone</small></span></label>
-        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait <em className="recommended-tag">Complete assessment</em></strong><small>Voice and walking combined into one result · use your own walking recording or a sample</small></span></label>
+        <label className={modality === "voice" ? "choice-card selected" : "choice-card"}><input aria-label="Voice-only assessment" type="radio" name="modality" checked={modality === "voice"} onChange={() => setModality("voice")} /><span><strong>Voice only</strong><small>Microphone only</small></span></label>
+        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait <em className="recommended-tag">Complete assessment</em></strong><small>Voice and walking, one result</small></span></label>
       </div>
       <GaitInfo />
     </section>
 
     <section className="wizard-card">
-      <div className="wizard-step"><span>03</span><div><h2>Voice input</h2><p>Record or upload a sustained “aaah” — voice measures are extracted automatically. Researchers can enter lab feature values directly instead. <Link className="inline-link" href="/guide">New to this? See the 1-minute recording guide.</Link></p></div></div>
+      <div className="wizard-step"><span>03</span><div><h2>Voice input</h2><p>Record or upload a steady “aaah” for 5–10 seconds. <Link className="inline-link" href="/guide">Recording guide</Link></p></div></div>
       <div className="input-tabs" role="tablist" aria-label="Voice input method">
         {tabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" role="tab" aria-selected={inputMode === id} className={inputMode === id ? "input-tab active" : "input-tab"} onClick={() => setInputMode(id)} disabled={recording}><Icon size={16} />{label}</button>)}
       </div>
@@ -499,32 +495,30 @@ export function AssessmentWizard() {
     </section>
 
     {modality === "voice_gait" && <section className="wizard-card">
-      <div className="wizard-step"><span>04</span><div><h2>Walking (gait) recording</h2><p>The gait model looks at walking rhythm: stride timing, how much it varies, and left–right balance. Use a sample recording, or upload a foot-pressure file if you have one.</p></div></div>
+      <div className="wizard-step"><span>04</span><div><h2>Walking (gait) recording</h2><p>Use a sample or upload your own foot-pressure file.</p></div></div>
       <div className="sample-gait">
         <button type="button" className={gait?.name === "sample-walk-parkinsons-GaPt03.txt" ? "sample-card selected" : "sample-card"} aria-pressed={gait?.name === "sample-walk-parkinsons-GaPt03.txt"} onClick={() => void loadSampleGait("/samples/sample-walk-parkinsons-GaPt03.txt", "sample-walk-parkinsons-GaPt03.txt")} disabled={Boolean(loadingSample)}>
           <Footprints size={20} aria-hidden="true" />
-          <span><strong>Sample walk: person with Parkinson’s</strong><small>PhysioNet study participant GaPt03 · 2 min</small></span>
+          <span><strong>Parkinson’s sample</strong><small>PhysioNet · 2-min walk</small></span>
         </button>
         <button type="button" className={gait?.name === "sample-walk-control-GaCo03.txt" ? "sample-card selected" : "sample-card"} aria-pressed={gait?.name === "sample-walk-control-GaCo03.txt"} onClick={() => void loadSampleGait("/samples/sample-walk-control-GaCo03.txt", "sample-walk-control-GaCo03.txt")} disabled={Boolean(loadingSample)}>
           <Footprints size={20} aria-hidden="true" />
-          <span><strong>Sample walk: healthy control</strong><small>PhysioNet study participant GaCo03 · 2 min</small></span>
+          <span><strong>Healthy sample</strong><small>PhysioNet · 2-min walk</small></span>
         </button>
       </div>
       {loadingSample && <p className="preparing-note" role="status"><span className="spinner" aria-hidden="true" /> Loading sample walking recording…</p>}
-      <p className="field-hint">Samples come from the public PhysioNet “Gait in Parkinson’s Disease” dataset and were part of the gait model’s training data, so they demonstrate the feature rather than test its accuracy. Reports show when a sample was used.</p>
       <details className="gait-upload">
-        <summary>Upload your own walking recording</summary>
-        <p className="field-hint">A text or CSV file from foot-pressure insoles, recorded at 100 samples per second while walking for at least 20 seconds (about 2,000 rows). Each row has 19 columns: time, eight left-foot sensors, eight right-foot sensors, total left force, total right force — the format of the files in <code>data/gait-in-parkinsons-disease-1.0.0</code>.</p>
+        <summary>Upload your own recording</summary>
+        <p className="field-hint">Foot-pressure insole file (.txt/.csv), 100 Hz, 19 columns, at least 20 seconds of walking.</p>
         <label className="file-picker">Choose gait file<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void selectGait(event.target.files?.[0])} /></label>
       </details>
       {gait && <p className="file-selected">{gait.name.startsWith("sample-") ? "Using sample: " : ""}{gait.name} · {(gait.size / 1024).toFixed(1)} KB</p>}
-      {gaitPreview.length > 0 && <div className="preview-wrap"><p className="field-hint">Validated preview (first rows)</p><table className="preview-table"><tbody>{gaitPreview.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div>}
+      {gaitPreview.length > 0 && !gait?.name.startsWith("sample-") && <div className="preview-wrap"><p className="field-hint">Validated preview (first rows)</p><table className="preview-table"><tbody>{gaitPreview.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div>}
       {gaitError && <ErrorMessage>{gaitError}</ErrorMessage>}
     </section>}
 
-    <section className="submission-panel"><div><strong>Analysis availability</strong><p>{availability?.voice.artifact_available ? "The local research voice artifact is available for this exact 16-feature input." : "A compatible local voice artifact is not currently available; your submission will be saved as unavailable without a score."} {modality === "voice_gait" && (availability?.fusion.portal_inference_available ? "Validated fusion artifacts are available." : availability?.fusion.reason || "Fusion artifacts are unavailable.")}</p></div>
+    <section className="submission-panel">
       {submitError && <ErrorMessage>{submitError}</ErrorMessage>}<button className="button" type="button" onClick={() => void submit()} disabled={!canSubmit}>{submitting ? "Submitting securely…" : "Submit assessment"}</button>
-      {!canSubmit && !submitting && <span className="field-hint">Required: participant name, consent, {usesAudio ? "a 3–60 second recording" : "all 16 finite feature values"}{modality === "voice_gait" ? ", and a valid gait file" : ""}.</span>}
     </section>
   </div>;
 }

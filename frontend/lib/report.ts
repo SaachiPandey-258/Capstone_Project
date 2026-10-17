@@ -49,15 +49,38 @@ export function participantRows(report: Assessment): [string, string][] {
 export function assessmentRows(report: Assessment): [string, string][] {
   const fromAudio = report.files.some((file) => file.kind === "voice");
   return [
-    ["Assessment date", formatDateTime(report.created_at)],
-    ["Input pathway", report.modality === "voice_gait" ? "Voice + gait" : "Voice only"],
-    ["Voice source", fromAudio ? `Audio recording (${report.duration_seconds} s), features extracted automatically` : "Submitted acoustic feature values"],
+    ["Date", formatDateTime(report.created_at)],
+    ["Assessment", report.modality === "voice_gait" ? "Voice + gait" : "Voice only"],
+    ["Voice input", fromAudio ? `Recording (${report.duration_seconds} s)` : "Feature values"],
     ...gaitSourceRow(report),
-    ["Severity model", modelLabel(report.result?.model)],
-    ["Screening model", report.result?.screening_basis === "voice_gait" && report.result.voice_screening && report.result.gait_screening
-      ? `Combined: ${modelLabel(report.result.voice_screening.model)} + ${modelLabel(report.result.gait_screening.model)}`
-      : report.result?.screening_model ? modelLabel(report.result.screening_model) : "Unavailable"],
   ];
+}
+
+const SHORT_MODEL_NAMES: Record<string, string> = {
+  "rf-spectral-pd-screen-v4": "voice (spectral, phone-trained)",
+  "logistic-pd-screen-v3": "voice (lab measures)",
+  "svm-gait-pd-screen-v1": "gait (stride timing)",
+};
+
+/** Short bullet notes for the end of the report. */
+export function reportNotes(report: Assessment, findings: Findings): string[] {
+  const result = report.result;
+  const models = result?.screening_basis === "voice_gait" && result.voice_screening && result.gait_screening
+    ? `${SHORT_MODEL_NAMES[result.voice_screening.model] ?? result.voice_screening.model} + ${SHORT_MODEL_NAMES[result.gait_screening.model] ?? result.gait_screening.model}, averaged`
+    : SHORT_MODEL_NAMES[result?.screening_model ?? ""] ?? result?.screening_model ?? "unavailable";
+  const notes = [
+    "Research screening only — not a diagnosis and not clinically validated.",
+    "About 1 in 7 healthy people receive “Detected”, and about 1 in 7 people with Parkinson’s receive “Not detected”.",
+  ];
+  if (findings.tier === "detected") {
+    notes.push(`Severity is an indicative motor UPDRS (Part III) estimate${findings.mae ? ` (± ${findings.mae.toFixed(0)} points)` : ""}: mild ≤ 32, moderate 33–58, severe ≥ 59.`);
+  }
+  notes.push(`Screening model: ${models}.`);
+  return notes;
+}
+
+export function reportTitle(report: Assessment) {
+  return report.modality === "voice_gait" ? "Voice & Gait Screening Report" : "Voice Screening Report";
 }
 
 export type Findings = {
@@ -117,21 +140,21 @@ export function reportFindings(report: Assessment): Findings | null {
     headline = "Voice markers associated with Parkinson’s detected";
     interpretation = `The screening model found acoustic markers associated with Parkinson’s disease${p}. ${severity} A clinical assessment is recommended to interpret this result.`;
     if (errorRates?.healthy_detected != null && errorRates.pd_detected != null) {
-      reliability = `In testing on speakers not seen during training, ${pct(errorRates.pd_detected)} of people with Parkinson’s and ${pct(errorRates.healthy_detected)} of healthy speakers received this result.`;
+      reliability = `In testing, ${pct(errorRates.pd_detected)} of people with Parkinson’s and ${pct(errorRates.healthy_detected)} of healthy people got this result.`;
     }
   } else if (tier === "not_detected") {
     verdict = "Not detected";
     headline = "No voice markers associated with Parkinson’s detected";
     interpretation = `The screening model did not find acoustic markers associated with Parkinson’s disease${p}. The severity estimate is not applicable without detected markers. A voice screen cannot rule out Parkinson’s; consult a clinician about any symptoms.`;
     if (errorRates?.healthy_not_detected != null && errorRates.pd_not_detected != null) {
-      reliability = `In testing on speakers not seen during training, ${pct(errorRates.healthy_not_detected)} of healthy speakers and ${pct(errorRates.pd_not_detected)} of people with Parkinson’s received this result.`;
+      reliability = `In testing, ${pct(errorRates.healthy_not_detected)} of healthy people and ${pct(errorRates.pd_not_detected)} of people with Parkinson’s got this result.`;
     }
   } else if (tier === "inconclusive") {
     verdict = "Inconclusive";
     headline = "Voice markers are borderline";
     interpretation = `The screening result falls between the decision thresholds${p}, so the voice sample does not support either conclusion. Record again in a quiet room, or discuss any symptoms with a clinician. The severity estimate is not applicable to an inconclusive screen.`;
     if (errorRates?.healthy_inconclusive != null && errorRates.pd_inconclusive != null) {
-      reliability = `In testing, ${pct(errorRates.pd_inconclusive)} of people with Parkinson’s and ${pct(errorRates.healthy_inconclusive)} of healthy speakers received an inconclusive result.`;
+      reliability = `In testing, ${pct(errorRates.pd_inconclusive)} of people with Parkinson’s and ${pct(errorRates.healthy_inconclusive)} of healthy people got this result.`;
     }
   }
   const voicePart = result.voice_screening;
@@ -145,7 +168,7 @@ export function reportFindings(report: Assessment): Findings | null {
     headline = headline.replace("Voice markers", "Voice and gait markers").replace("No voice markers", "No voice or gait markers").replace("Voice markers are borderline", "Voice and gait markers are borderline");
     if (reliability) {
       reliability = reliability
-        .replace(/^In testing on speakers not seen during training,|^In testing,/, "In simulated voice + gait testing,")
+        .replace(/^In testing,/, "In simulated testing,")
         .replace("healthy speakers", "healthy people");
     }
     const combinedText = interpretation
@@ -181,15 +204,13 @@ export function gaitRows(report: Assessment): [string, string][] {
 function gaitSourceRow(report: Assessment): [string, string][] {
   const gait = report.files.find((file) => file.kind === "gait");
   if (!gait) return [];
-  return [["Walking recording", gait.name.startsWith("sample-")
-    ? `Sample from the PhysioNet gait dataset (${gait.name}), not the participant’s own walking`
-    : `${gait.name}${gait.validated_rows ? ` · ${gait.validated_rows.toLocaleString()} rows` : ""}`]];
+  return [["Walking input", gait.name.startsWith("sample-") ? "Sample recording (PhysioNet dataset)" : "Uploaded recording"]];
 }
 
 export const NEXT_STEP_TEXT: Record<ScreeningTier, string> = {
-  detected: "Book an appointment with a neurologist (ideally a movement-disorder specialist) and take this report. Do not start, stop or change any medicine because of this screen.",
-  inconclusive: "Record again on another day in a quiet room. If results stay inconclusive, or you have symptoms such as tremor, slowness, stiffness or a softer voice, discuss them with a doctor.",
-  not_detected: "No markers were found in this recording, but a screen cannot rule Parkinson’s out. See a doctor about any symptoms, and repeat the assessment every few months to track change.",
+  detected: "See a neurologist and take this report with you.",
+  inconclusive: "Record again on another day; see a doctor if it stays inconclusive or you have symptoms.",
+  not_detected: "No markers found. A screen cannot rule Parkinson’s out — see a doctor about any symptoms.",
 };
 
 export const NEXT_STEP_ANCHOR: Record<ScreeningTier, string> = {

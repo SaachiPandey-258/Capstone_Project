@@ -20,11 +20,11 @@ import {
   tierLabel,
   NEXT_STEP_TEXT,
   formatDateTime,
-  LIMITATIONS,
   participantRows,
   reportFindings,
+  reportNotes,
   reportNumber,
-  SEVERITY_NOTE,
+  reportTitle,
   type Findings,
 } from "@/lib/report";
 
@@ -121,7 +121,7 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
           <View><Text style={styles.brand}>Parkinson&apos;s Assessment &amp; Monitoring</Text><Text style={styles.brandSub}>Research voice analysis</Text></View>
           <View><Text style={styles.ids}>Report no. {reportNumber(report)}</Text><Text style={styles.ids}>Issued {formatDateTime(report.created_at)}</Text></View>
         </View>
-        <Text style={styles.title}>VOICE ASSESSMENT REPORT</Text>
+        <Text style={styles.title}>{reportTitle(report).toUpperCase()}</Text>
 
         <View style={styles.section}><Text style={styles.heading}>1. Participant information</Text><Rows rows={participantRows(report)} /></View>
         <View style={styles.section}><Text style={styles.heading}>2. Assessment details</Text><Rows rows={assessmentRows(report)} /></View>
@@ -130,9 +130,8 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
           <Text style={styles.heading}>3. Findings</Text>
           <View style={styles.findings}>
             <View style={styles.box}>
-              <Text style={styles.boxLabel}>{findings.combined ? "Combined voice + gait screening" : "Parkinson's voice screening"}</Text>
+              <Text style={styles.boxLabel}>{findings.combined ? "Voice + gait screening" : "Voice screening"}</Text>
               <Text style={[styles.verdict, { color: verdictColor }]}>{findings.verdict}</Text>
-              <Text style={styles.verdictSub}>{findings.headline}</Text>
               {findings.probability !== null && <>
                 <View style={styles.bar}>
                   <View style={[styles.barFill, { left: 0, width: `${findings.low * 100}%`, backgroundColor: "#cfe8da" }]} />
@@ -140,23 +139,22 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
                   <View style={[styles.barFill, { left: `${findings.high * 100}%`, right: 0, backgroundColor: "#f2cfca" }]} />
                   <View style={[styles.barMark, { left: `${findings.probability * 100}%`, width: 3, backgroundColor: "#1b2b44" }]} />
                 </View>
-                <View style={styles.barLegend}><Text>Model probability {(findings.probability * 100).toFixed(0)}%</Text><Text>Cut-offs {(findings.low * 100).toFixed(0)}% / {(findings.high * 100).toFixed(0)}%</Text></View>
+                <View style={styles.barLegend}><Text>Not detected</Text><Text>Probability {(findings.probability * 100).toFixed(0)}%</Text><Text>Detected</Text></View>
               </>}
               {findings.parts.map((part) => (
-                <Text key={part.label} style={[styles.verdictSub, { marginTop: 4 }]}>{part.label} model: {Math.round(part.probability * 100)}% · {tierLabel(part.tier)}</Text>
+                <Text key={part.label} style={[styles.verdictSub, { marginTop: 4 }]}>{part.label}: {Math.round(part.probability * 100)}% · {tierLabel(part.tier)}</Text>
               ))}
               {findings.reliability && <Text style={[styles.verdictSub, { marginTop: 8 }]}>{findings.reliability}</Text>}
               {findings.gaitNote && <Text style={[styles.verdictSub, { marginTop: 6 }]}>{findings.gaitNote}</Text>}
             </View>
-            <View style={styles.box}>
-              <Text style={styles.boxLabel}>Estimated motor UPDRS (Part III)</Text>
+            {severityApplies && <View style={styles.box}>
+              <Text style={styles.boxLabel}>Estimated severity (motor UPDRS)</Text>
               <PdfGauge findings={findings} />
               <Text style={styles.score}>{findings.score.toFixed(1)}{findings.mae ? ` +/- ${findings.mae.toFixed(0)}` : ""} / {findings.max}</Text>
-              <Text style={styles.scoreSub}>{severityApplies ? `${findings.band} motor severity (indicative)` : "Severity not applicable"} · Mild 0-32 · Moderate 33-58 · Severe 59-108</Text>
-            </View>
+              <Text style={styles.scoreSub}>{findings.band} · Mild 0-32 · Moderate 33-58 · Severe 59-108</Text>
+            </View>}
           </View>
-          <Text style={styles.interpretation}>Interpretation. {findings.interpretation}</Text>
-          {findings.tier && <Text style={[styles.interpretation, { marginTop: 6 }]}>What to do next. {NEXT_STEP_TEXT[findings.tier]}</Text>}
+          {findings.tier && <Text style={styles.interpretation}>Next step: {NEXT_STEP_TEXT[findings.tier]}</Text>}
         </View>
 
         {features.length > 0 && <View style={styles.section} wrap={false}>
@@ -186,9 +184,8 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
         </View>}
 
         <View style={styles.section} wrap={false}>
-          <Text style={styles.heading}>{++sectionNo}. Notes and limitations</Text>
-          <Text style={styles.note}>{pdfText(SEVERITY_NOTE)}</Text>
-          <Text style={styles.note}>{pdfText(LIMITATIONS)}</Text>
+          <Text style={styles.heading}>{++sectionNo}. Notes</Text>
+          {reportNotes(report, findings).map((note) => <Text key={note} style={styles.note}>• {pdfText(note)}</Text>)}
         </View>
 
         <View style={styles.foot} fixed>

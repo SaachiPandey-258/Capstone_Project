@@ -226,7 +226,6 @@ describe("assessment validation and submission", () => {
     let finishRequest: ((value: Assessment) => void) | undefined;
     submit.mockReturnValue(new Promise((resolve) => { finishRequest = resolve; }));
     render(<AssessmentWizard />);
-    expect(await screen.findByText(/exact 16-feature input/)).toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Submit assessment" });
     expect(button).toBeDisabled();
     expect(screen.queryByRole("heading", { name: "Your assessment record was saved" })).not.toBeInTheDocument();
@@ -279,7 +278,7 @@ describe("assessment history and submission journey", () => {
     expect(screen.getByText("What is gait, and why does it matter?")).toBeInTheDocument();
     expect(screen.getByText("Complete assessment")).toBeInTheDocument();
     await user.click(screen.getByLabelText("Voice and gait assessment"));
-    await user.click(screen.getByRole("button", { name: /Sample walk: person with Parkinson’s/ }));
+    await user.click(screen.getByRole("button", { name: /Parkinson’s sample/ }));
     expect(fetchMock).toHaveBeenCalledWith("/samples/sample-walk-parkinsons-GaPt03.txt");
     expect(await screen.findByText(/Using sample: sample-walk-parkinsons-GaPt03.txt/)).toBeInTheDocument();
   });
@@ -418,11 +417,11 @@ describe("reports and progress analytics", () => {
       },
     };
     render(<ReportView report={completed} />);
-    expect(screen.getByRole("heading", { name: "Voice Assessment Report" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Voice Screening Report" })).toBeInTheDocument();
     expect(screen.getByText("Asha Rao")).toBeInTheDocument();
     expect(screen.getByText("Mumbai, India")).toBeInTheDocument();
     expect(screen.getByText("Detected", { selector: ".detection-verdict" })).toBeInTheDocument();
-    expect(screen.getByText("Moderate motor severity (indicative)")).toBeInTheDocument();
+    expect(screen.getByText("Moderate", { selector: ".severity-chip" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Estimated motor UPDRS 41.2 of 108" })).toBeInTheDocument();
   });
 
@@ -447,9 +446,9 @@ describe("reports and progress analytics", () => {
     };
     render(<ReportView report={borderline} />);
     expect(screen.getByText("Inconclusive", { selector: ".detection-verdict" })).toBeInTheDocument();
-    expect(screen.getByText("Severity not applicable")).toBeInTheDocument();
-    expect(screen.getByText(/49% of people with Parkinson’s and 42% of healthy speakers/)).toBeInTheDocument();
-    expect(screen.getByText(/± 7/)).toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /Estimated motor UPDRS/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/49% of people with Parkinson’s and 42% of healthy people/)).toBeInTheDocument();
+    expect(screen.queryByText(/± 7/)).not.toBeInTheDocument();
   });
 
   it("shows one combined verdict for voice + gait with both contributing models", () => {
@@ -474,7 +473,8 @@ describe("reports and progress analytics", () => {
       },
     };
     render(<ReportView report={combined} />);
-    expect(screen.getByText("Combined voice + gait screening")).toBeInTheDocument();
+    expect(screen.getByText("Voice + gait screening")).toBeInTheDocument();
+    expect(screen.queryByText(/Interpretation/)).not.toBeInTheDocument();
     expect(screen.getByText("Detected", { selector: ".detection-verdict" })).toBeInTheDocument();
     expect(screen.getByText("50% · Inconclusive")).toBeInTheDocument();
     expect(screen.getByText("90% · Detected")).toBeInTheDocument();
@@ -485,16 +485,17 @@ describe("reports and progress analytics", () => {
 
   it("tells the participant what to do next and links to a neurologist search", () => {
     render(<ReportView report={{ ...unavailable, status: "completed", unavailable_reason: "", result: { prediction: 20, screening_tier: "detected", pd_probability: 0.8, pd_low_threshold: 0.44, pd_high_threshold: 0.61 } }} />);
-    expect(screen.getByText(/Book an appointment with a neurologist/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Find a neurologist near you/ })).toHaveAttribute("href", "/specialists?category=neurology");
+    expect(screen.getByText(/See a neurologist and take this report with you/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Find a neurologist/ })).toHaveAttribute("href", "/specialists?category=neurology");
     expect(screen.getByRole("link", { name: /Next steps & care/ })).toHaveAttribute("href", "/next-steps#detected");
   });
 
   it("explains care, diagnosis and why a result can change without implying a cure", () => {
     render(<NextStepsPage />);
     expect(screen.getByRole("heading", { name: /Can a “Detected” result change to “Not detected”\?/ })).toBeInTheDocument();
-    expect(screen.getByText(/not that Parkinson’s has gone/)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Medicines" })).toBeInTheDocument();
+    expect(screen.getByText(/Parkinson’s has gone/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Who can help" })).toBeInTheDocument();
+    expect(screen.queryByText(/levodopa|medicine/i)).not.toBeInTheDocument();
     expect(screen.getAllByRole("link", { name: /Find a neurologist near you/ })[0]).toHaveAttribute("href", "/specialists?category=neurology");
   });
 

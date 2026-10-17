@@ -15,13 +15,8 @@ export function GaitInfo({ open = false }: { open?: boolean }) {
           ))}
         </svg>
         <div>
-          <p><strong>Gait means the way a person walks</strong>: step length, rhythm, how long each foot stays on the ground and how even the left and right sides are.</p>
-          <p>Parkinson’s often changes walking: shorter or shuffling steps, less regular timing from one stride to the next, and differences between the left and right sides. The gait model measures exactly these timing changes.</p>
-          <p>Voice and walking are affected by Parkinson’s in different ways, so combining them gives a more reliable result than either alone (combined AUC 0.84 vs 0.77). The gait model uses a <strong>foot-pressure recording</strong> from sensor insoles worn while walking for 20 seconds or more, recorded 100 times per second.</p>
-          <ul>
-            <li><strong>Have an insole recording?</strong> Choose <strong>Voice + gait</strong> and upload it.</li>
-            <li><strong>No recording yet?</strong> Choose Voice + gait and load a <strong>sample walking recording</strong> from a public research dataset to see the complete assessment, or run <strong>Voice only</strong> for now.</li>
-          </ul>
+          <p><strong>Gait is the way a person walks</strong> — step rhythm, timing and left–right balance. Parkinson’s often makes steps shorter, less regular and uneven between sides.</p>
+          <p>The gait model reads these timing changes from a foot-pressure (sensor insole) recording. No recording? Use a sample, or choose Voice only.</p>
         </div>
       </div>
     </details>

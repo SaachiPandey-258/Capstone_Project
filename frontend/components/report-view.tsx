@@ -9,14 +9,14 @@ import {
   featureRows,
   formatDateTime,
   gaitRows,
-  LIMITATIONS,
   participantRows,
   reportFindings,
   reportNumber,
-  SEVERITY_NOTE,
   tierLabel,
   NEXT_STEP_ANCHOR,
   NEXT_STEP_TEXT,
+  reportNotes,
+  reportTitle,
 } from "@/lib/report";
 
 export function ReportView({ report }: { report: Assessment }) {
@@ -42,7 +42,7 @@ export function ReportView({ report }: { report: Assessment }) {
         <span>Issued {formatDateTime(report.created_at)}</span>
       </div>
     </header>
-    <h2 id="report-heading" className="formal-report-title">Voice Assessment Report</h2>
+    <h2 id="report-heading" className="formal-report-title">{reportTitle(report)}</h2>
 
     <section className="formal-section">
       <h3>1. Participant information</h3>
@@ -56,21 +56,20 @@ export function ReportView({ report }: { report: Assessment }) {
 
     <section className="formal-section">
       <h3>3. Findings</h3>
-      <div className="findings-grid">
+      <div className={severityApplies ? "findings-grid" : "findings-grid single"}>
         <div className={`detection-card ${detectionClass}`}>
-          <span className="detection-label">{findings.combined ? "Combined voice + gait screening" : "Parkinson’s voice screening"}</span>
+          <span className="detection-label">{findings.combined ? "Voice + gait screening" : "Voice screening"}</span>
           <strong className="detection-verdict">{findings.verdict}</strong>
-          <span className="detection-headline">{findings.headline}</span>
           {findings.probability !== null && <div className="probability">
             <div className="probability-track zoned" aria-hidden="true" style={{ "--low": `${findings.low * 100}%`, "--high": `${findings.high * 100}%` } as CSSProperties}>
               <span className="probability-marker" style={{ "--fill": `${(findings.probability * 100).toFixed(1)}%` } as CSSProperties} />
             </div>
             <div className="probability-scale"><span>Not detected</span><span>Inconclusive</span><span>Detected</span></div>
-            <div className="probability-legend"><span>Model probability <strong>{(findings.probability * 100).toFixed(0)}%</strong></span><span>Cut-offs {(findings.low * 100).toFixed(0)}% / {(findings.high * 100).toFixed(0)}%</span></div>
+            <div className="probability-legend"><span>Probability <strong>{(findings.probability * 100).toFixed(0)}%</strong></span></div>
           </div>}
           {findings.parts.length > 0 && <div className="screening-parts" aria-label="Contributing models">
             {findings.parts.map((part) => <div key={part.label} className={`screening-part tier-${part.tier}`}>
-              <span className="screening-part-label">{part.label} model</span>
+              <span className="screening-part-label">{part.label}</span>
               <div className="mini-track" style={{ "--low": `${part.low * 100}%`, "--high": `${part.high * 100}%` } as CSSProperties}>
                 <span className="mini-marker" style={{ left: `${part.probability * 100}%` }} />
               </div>
@@ -80,21 +79,19 @@ export function ReportView({ report }: { report: Assessment }) {
           {findings.reliability && <p className="detection-reliability">{findings.reliability}</p>}
           {findings.gaitNote && <p className="field-hint">{findings.gaitNote}</p>}
         </div>
-        <div className="gauge-card">
-          <span className="detection-label">Estimated motor UPDRS (Part III)</span>
-          <SeverityGauge value={findings.score} max={findings.max} muted={!severityApplies} />
+        {severityApplies && <div className="gauge-card">
+          <span className="detection-label">Estimated severity (motor UPDRS)</span>
+          <SeverityGauge value={findings.score} max={findings.max} />
           <div className="gauge-readout"><strong>{findings.score.toFixed(1)}</strong><span>{findings.mae ? ` ± ${findings.mae.toFixed(0)}` : ""} / {findings.max}</span></div>
-          <span className={severityApplies ? `severity-chip band-${findings.band.toLowerCase()}` : "severity-chip"}>{severityApplies ? `${findings.band} motor severity (indicative)` : "Severity not applicable"}</span>
-          <ul className="gauge-legend">{UPDRS_BANDS.map((band) => <li key={band.label}><i style={{ background: band.color }} />{band.label} <small>{band.from === 0 ? 0 : band.from + 1}–{band.to}</small></li>)}</ul>
-        </div>
+          <span className={`severity-chip band-${findings.band.toLowerCase()}`}>{findings.band}</span>
+          <ul className="gauge-legend">{UPDRS_BANDS.map((band) => <li key={band.label}><i style={{ background: band.color }} />{band.label}</li>)}</ul>
+        </div>}
       </div>
-      <p className="formal-interpretation"><strong>Interpretation.</strong> {findings.interpretation}</p>
       {findings.tier && <div className={`next-step-box tone-${findings.tier}`}>
-        <div><strong>What to do next.</strong> {NEXT_STEP_TEXT[findings.tier]}</div>
+        <div><strong>Next step:</strong> {NEXT_STEP_TEXT[findings.tier]}</div>
         <div className="next-step-actions">
-          <Link className="button button-small" href="/specialists?category=neurology"><MapPinned size={15} /> Find a neurologist near you</Link>
+          <Link className="button button-small" href="/specialists?category=neurology"><MapPinned size={15} /> Find a neurologist</Link>
           <Link className="button button-small button-outline" href={`/next-steps#${NEXT_STEP_ANCHOR[findings.tier]}`}>Next steps &amp; care</Link>
-          <Link className="text-link" href="/next-steps#can-it-change">Can this result change?</Link>
         </div>
       </div>}
       {report.result?.screening_unavailable_reason && <p className="field-hint">Screening unavailable: {String(report.result.screening_unavailable_reason)}</p>}
@@ -123,9 +120,8 @@ export function ReportView({ report }: { report: Assessment }) {
     </section>}
 
     <section className="formal-section formal-notes">
-      <h3>{++sectionNo}. Notes and limitations</h3>
-      <p>{SEVERITY_NOTE}</p>
-      <p>{LIMITATIONS}</p>
+      <h3>{++sectionNo}. Notes</h3>
+      <ul>{reportNotes(report, findings).map((note) => <li key={note}>{note}</li>)}</ul>
     </section>
 
     <footer className="formal-report-foot">
