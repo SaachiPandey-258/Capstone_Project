@@ -6,6 +6,8 @@ This manual covers how to run the project, how it works, every model and dataset
 
 **This is the single complete reference for the project.**
 
+**Terminology.** The person being assessed is called a **participant**, not a patient, because results are not verified by a clinician. Some internal code names (e.g. `patient_*` API fields) keep the older word.
+
 **How to read it**
 
 - **New to the project?** Read §1 (quick facts), §2 (problem), §5 (features) and §3 (how to run), then try the app.
@@ -52,14 +54,16 @@ This manual covers how to run the project, how it works, every model and dataset
 | Start | `./start.command` (macOS) or `start.bat` (Windows) |
 | Screening for **recorded audio** | `rf-spectral-pd-screen-v4`: Random forest on 28 spectral, cepstral and pitch measures, trained on 78 phone recordings with age balancing. **ROC AUC 0.782** (0.765 on the age-matched ≥ 55 subgroup) |
 | Screening for **typed/dataset values** | `logistic-pd-screen-v3`: Logistic regression on 13 log-scaled Praat measures, trained on 951 recordings from 284 speakers. **ROC AUC 0.758**; cross-dataset 0.831 / 0.732 |
-| Severity | `ridge-log-updrs-v2`: Ridge regression on 13 log-scaled Praat measures, trained on 5,875 recordings from 42 patients. **MAE 6.95** (cohort-mean MAE 7.13, R² −0.005) |
-| Voice + gait | `dual-branch-fusion-updrs-v1`: CNN + MLP. **R² 0.914 is leakage**; held-out-subject R² is **0.25 on average** (−0.12 to 0.72) |
+| Severity | `ridge-log-updrs-v2`: Ridge regression on 13 log-scaled Praat measures, trained on 5,875 recordings from 42 people with Parkinson's. **MAE 6.95** (cohort-mean MAE 7.13, R² −0.005) |
+| Gait screening | `svm-gait-pd-screen-v1`: SVM on 9 stride-timing measures, trained on 306 walking recordings from 165 people (93 PD, 72 controls). **AUC 0.801** per person; cross-study 0.71–0.74 |
+| **Voice + gait combined** | Late fusion (average of voice and gait probabilities) gives **one verdict**. Simulated **AUC 0.845** vs 0.77 voice / 0.77 gait alone; Detected: 65.6% of PD, 14.0% of healthy |
+| Severity with gait | `dual-branch-fusion-updrs-v1`: CNN + MLP. **R² 0.914 is leakage**; held-out-subject R² is **0.25 on average** (−0.12 to 0.72) |
 | Result tiers (audio) | Not detected < 44% ≤ Inconclusive < 61% ≤ Detected |
 | Audio tier error rates | Detected: 55% of PD, 13% of healthy · Not detected: 53% of healthy, 15% of PD |
 | Key discovery | On phone audio, the original lab-style model scored **AUC 0.475** (chance) and flagged 72% of healthy people. Jitter and shimmer carry no signal on phone audio, while spectral and cepstral features do. |
 | Datasets | Little et al. (195 rec, 32 spk) · Tsanas et al. (5,875 rec, 42 pts) · Sakar et al. (756 rec, 252 spk) · Iyer et al. (81 phone WAVs) · PhysioNet Gait in PD (gait signals) |
 | Care finder | OpenStreetMap Nominatim (primary, India-only, healthcare types filtered) + Overpass (fallback); ~4–7 s per search |
-| Tests | 31 backend (pytest) + 21 frontend (Vitest), all passing |
+| Tests | 32 backend (pytest) + 22 frontend (Vitest), all passing |
 
 ---
 
@@ -159,6 +163,7 @@ python -m scripts.train_vocal              # UPDRS ridge regressor  -> models/up
 python -m scripts.train_classifier         # lab-feature screening  -> models/pd_classifier.pkl
 python -m scripts.extract_audio_dataset    # extract features from data/iyer2023 WAVs -> data/iyer2023_features.csv
 python -m scripts.train_audio_classifier   # audio screening        -> models/pd_audio_classifier.pkl
+python -m scripts.train_gait_classifier    # gait screening + voice/gait fusion calibration -> models/pd_gait_classifier.pkl
 python -m scripts.train_fusion             # voice+gait fusion (research; see leakage notes)
 python -m scripts.evaluate_fusion_leakage  # random vs subject-held-out fusion evaluation
 ```
@@ -168,8 +173,8 @@ Each trainer writes a `*_metrics.json` file (except fusion) containing the proto
 ### 3.7 Running tests
 
 ```bash
-.venv/bin/python -m pytest backend/tests -q     # 31 tests
-cd frontend && npx vitest run                    # 21 tests
+.venv/bin/python -m pytest backend/tests -q     # 32 tests
+cd frontend && npx vitest run                    # 22 tests
 cd frontend && npx tsc --noEmit                  # type check
 ```
 
@@ -197,7 +202,7 @@ cd frontend && npx tsc --noEmit                  # type check
             ▼
  FastAPI backend (backend/app.py)
  ├─ Auth: email+password (PBKDF2-SHA256), Google ID-token verification, sessions
- ├─ Assessments: consent, patient details, uploads, quality gates, feature extraction
+ ├─ Assessments: consent, participant details, uploads, quality gates, feature extraction
  │    └─ backend/audio_features.py  (Praat/Parselmouth + SciPy)
  ├─ Inference (scripts/inference.py)
  │    ├─ Audio screening  : rf-spectral-pd-screen-v4   (models/pd_audio_classifier.pkl)
@@ -247,10 +252,10 @@ start.command / start.bat
 | **Home** (`/`) | Landing page with animated voice-analysis card (live waveform, feature chips, self-drawing trend line), feature sections, scroll-reveal animations |
 | **Register / Sign in** (`/register`, `/signin`) | Email + password accounts; Google sign-in (popup); session tokens valid 30 days |
 | **Dashboard / Overview** (`/dashboard`) | Welcome hero with illustration; stats (assessments, reports, latest date, **latest screening verdict**); quick-action tiles; recent assessment cards |
-| **New assessment** (`/assessment/new`) | 4-step wizard: ① patient details (name required; age, sex, location) + consent; ② type: voice or voice + gait; ③ voice input via **Record** (mic button, live level meter, “too quiet” warning), **Upload audio** (any browser-decodable format), or **Feature values** (16 fields or load `parkinsons.data` rows); ④ gait file (19-column, ≥ 200 rows) for fusion |
-| **Report** (`/reports/[id]`) | Opens automatically after a successful submission with a “report is ready” banner. Formal report: patient info, assessment details, screening verdict with probability bar and tier zones, UPDRS gauge with ± error, acoustic and voice-quality tables, limitations. PDF download; delete |
-| **Rejected recording** | If quality gates fail: clear reason, recording tips, **Record again** (keeps patient details), link to guide |
-| **My assessments** (`/assessments`) | Summary strip, filters (All / With report / Need attention), cards with colour-coded tier, probability, UPDRS, patient; **Delete with inline confirmation** (removes record + audio file) |
+| **New assessment** (`/assessment/new`) | 4-step wizard: ① participant details (name required; age, sex, location) + consent; ② type: voice or voice + gait; ③ voice input via **Record** (mic button, live level meter, “too quiet” warning), **Upload audio** (any browser-decodable format), or **Feature values** (16 fields or load `parkinsons.data` rows); ④ walking (gait) file — 19-column foot-pressure recording, ≥ 20 s of walking — screened by the gait model and combined with voice into one verdict |
+| **Report** (`/reports/[id]`) | Opens automatically after a successful submission with a “report is ready” banner. Formal report: participant info, assessment details, screening verdict with probability bar and tier zones, UPDRS gauge with ± error, acoustic and voice-quality tables, limitations. PDF download; delete |
+| **Rejected recording** | If quality gates fail: clear reason, recording tips, **Record again** (keeps participant details), link to guide |
+| **My assessments** (`/assessments`) | Summary strip, filters (All / With report / Need attention), cards with colour-coded tier, probability, UPDRS, participant; **Delete with inline confirmation** (removes record + audio file) |
 | **Assessment record** (`/assessments/[id]`) | Raw record view, status, files, record again, delete |
 | **Reports** (`/reports`) | All completed reports as cards; illustrated empty state |
 | **Progress** (`/progress`) | Screening probability over time on coloured tier bands; selectable voice-measure trend (CPPS, pitch SD, HNR, jitter, shimmer); summary cards. Replaces the old “Analytics” page (`/analytics` redirects) |
@@ -273,8 +278,10 @@ start.command / start.bat
 | Recording quality | Whole clip analysed, including silence and noise → false “Detected” | Only the longest steady voiced segment is analysed; recordings rejected if < 1.5 s steady voice or SNR < 15 dB |
 | Screening | None (UPDRS estimate only) | Two screening models (audio-specific and lab-feature) with **three tiers** and published error rates |
 | Screening accuracy on phone audio | AUC 0.475; 72% of healthy flagged | AUC 0.782; 13% of healthy flagged |
+| Voice + gait | Two separate outputs: voice gave the verdict, gait only fed the severity number | **One combined verdict** from a new gait screening model + voice model (late fusion), with both parts shown |
+| Wording | “Patient” throughout | “Participant” (results are not clinically verified) |
 | Severity model | Random forest, 16 features, R² −0.105 | Ridge on 13 log features, MAE 6.95; shown only when screening = Detected, with ± MAE |
-| Report | Key-value dump | Formal report: patient details, verdict, gauge, tables, limitations; formal PDF |
+| Report | Key-value dump | Formal report: participant details, verdict, gauge, tables, limitations; formal PDF |
 | Submission journey | Inline result | Redirect to report page with success banner; rejected recordings get tips + Record again |
 | My assessments | Plain list, no delete | Cards, stats, filters, delete with confirmation (DB + files) |
 | Analytics | Always empty (depended on non-existent fields) | Progress page with real trends |
@@ -285,7 +292,7 @@ start.command / start.bat
 
 ### 6.2 New files (selection)
 
-- **Backend/scripts:** `scripts/train_classifier.py`, `scripts/train_audio_classifier.py`, `scripts/extract_audio_dataset.py`, `scripts/evaluate_fusion_leakage.py`, `backend/migrations/005_assessment_patient_details.sql`
+- **Backend/scripts:** `scripts/gait_features.py`, `scripts/train_gait_classifier.py`, `scripts/train_classifier.py`, `scripts/train_audio_classifier.py`, `scripts/extract_audio_dataset.py`, `scripts/evaluate_fusion_leakage.py`, `backend/migrations/005_assessment_patient_details.sql`
 - **Data:** `data/pd_speech_features.csv`, `data/iyer2023/` (WAVs + demographics), `data/iyer2023_features.csv`
 - **Models:** `pd_classifier.pkl`, `pd_audio_classifier.pkl`, `updrs_regressor.pkl` + metrics JSON
 - **Frontend:** `lib/audio.ts`, `lib/report.ts`, `lib/site.ts`, `components/severity-gauge.tsx`, `brand-logo.tsx`, `site-footer.tsx`, `illustrations.tsx`, `care-map.tsx`, `mic-check.tsx`, `progress-view.tsx`; pages `/guide`, `/progress`; `app/icon.svg`, `app/template.tsx`
@@ -298,7 +305,7 @@ start.command / start.bat
 
 1. **Capture.** `MediaRecorder` records with echo cancellation, noise suppression and auto-gain **off**, so the voice signal is not altered. Max 60 s. A live RMS meter warns if the level stays below 0.02 (about −34 dBFS).
 2. **Normalise.** `AudioContext.decodeAudioData` decodes the audio, then `OfflineAudioContext(1 channel, 16 kHz)` down-mixes and resamples it. It is encoded as 16-bit PCM WAV and the duration is read from the decoded buffer.
-3. **Upload** with consent, patient details and modality.
+3. **Upload** with consent, participant details and modality.
 
 ### 7.2 On the server (`backend/audio_features.py`, version `audio-extractor-v4`)
 
@@ -393,7 +400,39 @@ CPPS uses Praat's “Robust” trend fit. It is about 50× faster than “Robust
 | Tier rates (healthy) | Detected 11.5%, Inconclusive 41.8%, Not detected 46.8% |
 | Caveat | On phone audio processed by this app it scores **AUC 0.475**, which is why recorded audio uses model 9.1 |
 
-### 9.3 Severity — `ridge-log-updrs-v2`
+### 9.3 Gait screening — `svm-gait-pd-screen-v1` (used when a gait file is uploaded)
+
+| Field | Value |
+|---|---|
+| File | `models/pd_gait_classifier.pkl`; metrics `pd_gait_classifier_metrics.json` |
+| Features | 9 stride-timing measures from foot-contact timing (`scripts/gait_features.py`): stride time, stride/stance/swing time CV, swing %, swing % CV, cadence, swing asymmetry, stride-time asymmetry. Force magnitude is not used (calibration differs between insoles) |
+| Feature extraction | Contact = total foot force > 10% of the 95th-percentile load; strides between heel strikes; first/last 2 strides dropped; strides outside median ± 3·MAD or 0.6–2.5 s removed; ≥ **10 strides per foot** required (≈ 20 s of walking) |
+| Algorithm | log → StandardScaler → RBF SVM (C = 1, balanced, Platt probabilities) |
+| Data | PhysioNet Gait in PD: **306 recordings, 165 people (93 PD, 72 controls)**; studies Ga, Ju, Si. Labels and gait come from the **same person** |
+| Validation | StratifiedGroupKFold by person, 5 folds × 10 repeats; leave-one-study-out |
+| ROC AUC | **0.794** per recording; **0.801** per person |
+| Leave-one-study-out | Ga 0.733 · Ju 0.739 · Si 0.714 |
+| Thresholds (gait alone) | Not detected < **0.51** ≤ Inconclusive < **0.8** ≤ Detected |
+| Tier rates | PD: Detected 55.7%, Not detected 14.8% · Healthy: Detected 13.5%, Not detected 54.3% |
+| Group medians (control vs PD) | Swing time CV 3.64% vs 5.37%; swing asymmetry 1.53% vs 3.10%; swing 39.9% vs 38.4% of stride; stance time CV 3.22% vs 3.95% |
+
+### 9.4 Combined voice + gait screening — `late-fusion-mean-v1`
+
+When both inputs are given, the report shows **one verdict**: the **average of the voice-model and gait-model probabilities**, with its own thresholds. Both component results are shown underneath.
+
+- **Why late fusion?** No dataset contains voice and gait from the same people, so a single joint model cannot be trained honestly. Each model is trained on correctly labelled single-modality data, and only the probabilities are combined.
+- **How it was evaluated:** out-of-fold voice probabilities and gait probabilities were **paired at random within the same group** (PD with PD, healthy with healthy; 3,000 pairs per class). This assumes voice and gait errors are independent given diagnosis. It is a **simulation**, not a measurement on people who gave both.
+
+| Voice model in the pair | Voice alone AUC | Gait alone AUC | **Combined AUC** | Thresholds (low / high) | PD → Detected | Healthy → Detected | PD → Not detected | Inconclusive (PD / healthy) |
+|---|---|---|---|---|---|---|---|---|
+| Audio (`rf-spectral-pd-screen-v4`) | 0.769 | 0.769 | **0.845** | 0.53 / 0.65 | 65.6% | 14.0% | 14.7% | 19.6% / 22.6% |
+| Lab features (`logistic-pd-screen-v3`) | 0.751 | 0.769 | **0.836** | 0.52 / 0.64 | 63.2% | 14.5% | 14.4% | 22.4% / 21.1% |
+
+Compared with voice alone, combining with gait detects **about 10 percentage points more** people with PD at the same false-alarm rate, and cuts inconclusive results from about 30% to about 20%.
+
+If the gait file is too short (< 10 strides per foot), the report falls back to the voice-only verdict and explains why.
+
+### 9.5 Severity — `ridge-log-updrs-v2`
 
 | Field | Value |
 |---|---|
@@ -405,7 +444,7 @@ CPPS uses Praat's “Robust” trend fit. It is about 50× faster than “Robust
 | Metrics | **MAE 6.95**, RMSE 8.15, R² −0.005; predicting the cohort mean gives MAE 7.13 |
 | Interpretation | Not better than the cohort average for new people, so shown as “indicative ± 7” and **only when screening = Detected** |
 
-### 9.4 Voice + gait fusion — `dual-branch-fusion-updrs-v1` (research)
+### 9.6 Severity with gait — `dual-branch-fusion-updrs-v1` (research)
 
 | Field | Value |
 |---|---|
@@ -413,17 +452,17 @@ CPPS uses Praat's “Robust” trend fit. It is about 50× faster than “Robust
 | Architecture | Vocal MLP (16→32→16) + dual-branch 1-D CNN, one branch per foot (8 sensors each; Conv1d 8→16→32, max-pool, global avg-pool, FC 64→32) → fusion head (48→24→1, dropout 0.2) |
 | Training | Adam lr 1e‑3, StepLR (20, 0.5), 60 epochs, MSE, batch 64 |
 | Gait input | First 200 rows of the 19-column PhysioNet format (time, 8 left, 8 right, 2 totals) |
-| Pairing | `dataset_alignment.py`: nearest neighbour on [age, motor UPDRS]; **42 voice subjects → 27 gait patients** (mean match distance 2.04) |
+| Pairing | `dataset_alignment.py`: nearest neighbour on [age, motor UPDRS]; **42 voice subjects → 27 gait subjects** (mean match distance 2.04) |
 | Claimed result | R² 0.90 / RMSE 2.52 (hard-coded in `plot_comparison.py`) |
 | Reproduced, random split | **R² 0.914, RMSE 2.40, MAE 1.82** (mean-guess MAE 7.05) |
 | Subject-held-out (3 seeds) | **R² 0.248 on average** (−0.119, 0.143, 0.719), MAE **4.45**, RMSE 5.78; mean-guess MAE 7.23 |
 | Verdict | The 0.90 figure is **data leakage** from the same subjects in train and test. Even the held-out result is inflated, because gait files were chosen using the target (UPDRS), and voice and gait come from **different people**. Keep it as a research demonstration only. |
 
-### 9.5 Legacy baseline — `random-forest-updrs-v1`
+### 9.7 Legacy baseline — `random-forest-updrs-v1`
 
-Random forest on 16 features, subject-held-out 80/20 (33 train / 9 test subjects): **RMSE 8.03, MAE 6.77, R² −0.105**. It was replaced by 9.3. The earlier hard-coded “baseline R² 0.33” was also from a non-subject-independent protocol.
+Random forest on 16 features, subject-held-out 80/20 (33 train / 9 test subjects): **RMSE 8.03, MAE 6.77, R² −0.105**. It was replaced by 9.5. The earlier hard-coded “baseline R² 0.33” was also from a non-subject-independent protocol.
 
-### 9.6 Other research scripts in the repo (not used by the portal)
+### 9.8 Other research scripts in the repo (not used by the portal)
 
 - `scripts/train_cnn.py`: drawing (spiral/wave) image classifiers (VGG16/ResNet50/DenseNet121/EfficientNetV2S); data in `data/drawings/` (102 spiral, 102 wave images).
 - `scripts/fusion_engine.py`, `scripts/explain_model.py`: class-level meta-learner and SHAP explanation. They align datasets by class, not by person, so they are not subject-level multimodal evidence.
@@ -439,7 +478,7 @@ Random forest on 16 features, subject-held-out 80/20 (33 train / 9 test subjects
 | **Parkinsons Telemonitoring** (`data/parkinsons_updrs.data`) | Tsanas et al. 2010; UCI | **5,875 recordings, 42 people** with early PD (28 male / 14 female), age 36–85 | motor_UPDRS (5.0–39.5), total_UPDRS (7–55) | Severity model; fusion model |
 | **PD Speech Features** (`data/pd_speech_features.csv`) | Sakar et al. 2019; UCI #470, **CC BY 4.0** | 756 recordings, **252 speakers** (188 PD, 64 healthy), 3 per speaker; 754 features | class | Lab screening model (13 Praat columns) |
 | **Voice samples PD/HC** (`data/iyer2023/`) | Iyer et al. 2023; figshare doi 10.6084/m9.figshare.23849127, **CC BY 4.0** | 81 phone WAVs, 8 kHz, ~1.5–7.2 s (40 PD, 41 HC); 78 pass quality gates | PD/HC, age, sex | **Audio screening model**; external validation |
-| **Gait in Parkinson's Disease** (`data/gait-in-parkinsons-disease-1.0.0/`) | PhysioNet (Hausdorff et al.; sub-studies Ga/Ju/Si) | 306 gait recordings: GaPt 75, GaCo 38, JuPt 104, JuCo 25, SiPt 35, SiCo 29 | Pt = PD, Co = control | Fusion model; gait upload validation |
+| **Gait in Parkinson's Disease** (`data/gait-in-parkinsons-disease-1.0.0/`) | PhysioNet (Hausdorff et al.; sub-studies Ga/Ju/Si) | 306 gait recordings: GaPt 75, GaCo 38, JuPt 104, JuCo 25, SiPt 35, SiCo 29 | Pt = PD, Co = control | **Gait screening model**; severity-with-gait model; gait upload validation |
 | **Drawings** (`data/drawings/`) | Spiral/wave drawing dataset | 102 spiral + 102 wave images | healthy / parkinson | CNN research script only |
 | **Alignment map** (`data/aligned_patients_mapping.csv`) | Generated | 42 rows | – | Synthetic voice↔gait pairing |
 
@@ -546,7 +585,7 @@ Age-balanced training (AUC full / age ≥ 55 / corr(score, age) in healthy):
 | 13 + age + sex | Random forest | 8.03 | −0.481 |
 | Age + sex only | Gradient boosting | 7.48 | −0.281 |
 
-Conclusion: with 42 patients, voice cannot predict UPDRS across people better than the mean.
+Conclusion: with 42 people, voice cannot predict UPDRS across people better than the mean.
 
 ### 11.6 Fusion leakage audit (`scripts/evaluate_fusion_leakage.py`)
 
@@ -558,7 +597,18 @@ Conclusion: with 42 patients, voice cannot predict UPDRS across people better th
 | Subject held-out, seed 2 | 4.64 | 3.93 | 0.719 | 7.78 |
 | **Subject held-out, mean** | **5.78** | **4.45** | **0.248** | 7.23 |
 
-### 11.7 Sanity checks with synthetic voices (final models)
+### 11.7 Gait screening model comparison (165 people, grouped by person)
+
+| Model (log features) | AUC per recording | AUC per person | Leave-one-study-out Ga / Ju / Si |
+|---|---|---|---|
+| Logistic regression | 0.769 | 0.782 | 0.669 / 0.660 / 0.651 |
+| **SVM (RBF) — chosen** | **0.794** | **0.801** | **0.733 / 0.739 / 0.714** |
+| Random forest | 0.764 | 0.799 | 0.754 / 0.682 / 0.736 |
+| Gradient boosting | 0.750 | 0.782 | 0.710 / 0.679 / 0.739 |
+
+All 306 gait files produced valid stride features. Combined voice + gait results are in §9.4.
+
+### 11.8 Sanity checks with synthetic voices (final models)
 
 | Synthetic voice | Audio-model probability | Tier |
 |---|---|---|
@@ -606,7 +656,7 @@ End-to-end check with repo files (lab model + fusion): PD row + `GaPt03_01` → 
 | GET `/api/health` | Liveness |
 | GET `/api/models/status` | Availability of voice, screening (lab + audio) and fusion artifacts |
 | POST `/api/auth/register` · `/login` · `/google` · `/logout`; GET `/api/auth/me` | Accounts and sessions |
-| POST `/api/assessments` | Audio (+ optional gait) assessment: multipart with consent, modality, duration, voice, gait, patient_* |
+| POST `/api/assessments` | Audio (+ optional gait) assessment: multipart with consent, modality, duration, voice, gait, participant fields (`patient_*` in the API) |
 | POST `/api/assessments/manual` | 16 feature values (+ optional gait) |
 | GET `/api/assessments`, `/api/assessments/{id}` | History (owner-scoped) |
 | **DELETE** `/api/assessments/{id}` | Delete record + uploaded files (owner only; 404 otherwise) |
@@ -637,7 +687,7 @@ End-to-end check with repo files (lab model + fusion): PD row + `GaPt03_01` → 
 
 Report number `PD-XXXXXXXX` (first 8 hex characters of the record ID). Sections:
 
-1. Patient information
+1. Participant information
 2. Assessment details: date, pathway, voice source, severity model, screening model
 3. Findings: verdict card with probability bar over tier zones and tier error rates; UPDRS gauge with ± MAE and band legend; interpretation paragraph
 4. Acoustic measurements (16 features + CPPS, F0 SD, F0 range, spectral tilt)
@@ -651,8 +701,8 @@ The PDF is generated in the browser (A4, Helvetica) with a vector gauge and page
 
 | Suite | Count | Covers |
 |---|---|---|
-| Backend pytest | **31** | Auth/sessions, Google sign-in, migrations (v5), audio extraction, quality rejection, patient validation, three-tier screening, audio-model routing, delete (owner-only, files removed), gait validation, specialist search (filtering, fallback, rate limit, caching, India codes) |
-| Frontend Vitest | **21** | Navigation, auth guard, wizard validation, dataset loading, consent-gated mic, submit → redirect to report, rejected flow, report rendering (detected/inconclusive), progress empty state, delete confirmation, care search |
+| Backend pytest | **32** | Auth/sessions, combined voice + gait screening, Google sign-in, migrations (v5), audio extraction, quality rejection, participant-detail validation, three-tier screening, audio-model routing, delete (owner-only, files removed), gait validation, specialist search (filtering, fallback, rate limit, caching, India codes) |
+| Frontend Vitest | **22** | Combined voice + gait report, no “patient” wording, navigation, auth guard, wizard validation, dataset loading, consent-gated mic, submit → redirect to report, rejected flow, report rendering (detected/inconclusive), progress empty state, delete confirmation, care search |
 | Type check | `tsc --noEmit` clean | |
 | Browser E2E (Playwright, manual) | Full journey | Home, sign-in (Google button after client navigation), audio + gait submissions, rejection, history, delete, progress, live Mumbai search (37 listings), guide mic check, analytics redirect: **0 console errors** |
 
@@ -667,10 +717,11 @@ The PDF is generated in the browser (A4, Helvetica) with a vector gauge and page
 3. **Age confound** in the training data. Mitigated by weighting and checked in an age-matched subgroup (n = 45, only 9 healthy, so the estimate is noisy).
 4. **No clinical or external prospective validation.** Microphones and rooms differ from the training conditions.
 5. **Severity estimate** is not better than the average for new people.
-6. **Fusion** pairs different people via the target variable. It is not multimodal evidence.
-7. **RPDE/DFA/PPE implementations** are not calibrated.
-8. **Medication state, language and disease stage** are not modelled.
-9. **Ethics.** Explicit consent, no diagnosis claims, error rates shown, data private to the account, deletion supported, helplines shown, and results never fabricated (failed analyses are saved without scores).
+6. **Severity-with-gait model** pairs different people via the target variable. It is not multimodal evidence.
+7. **Combined voice + gait screening** accuracy is simulated by pairing different people from the same group. It assumes voice and gait errors are independent and has not been measured on people who gave both.
+8. **RPDE/DFA/PPE implementations** are not calibrated.
+9. **Medication state, language and disease stage** are not modelled.
+10. **Ethics.** Explicit consent, no diagnosis claims, error rates shown, data private to the account, deletion supported, helplines shown, and results never fabricated (failed analyses are saved without scores).
 
 ---
 
@@ -691,6 +742,15 @@ Features from lab microphones (Little/Sakar) and from phone audio behave differe
 **Q: How did you avoid data leakage?**
 All splits are by speaker/subject (StratifiedGroupKFold / GroupKFold). The Iyer data has one recording per person. Scalers sit inside pipelines fitted on training folds. I also showed that the inherited fusion result (R² 0.91) was leakage: it falls to 0.25 when subjects are held out.
 
+**Q: What does voice + gait give that voice alone does not?**
+One combined verdict. A gait model (SVM on stride-timing variability and asymmetry, AUC 0.80 on 165 people) and the voice model each produce a probability, and the report averages them. In simulation the combination reaches AUC 0.84 vs 0.77 for either alone, detecting about 66% of PD instead of 55% at the same ~14% false-alarm rate.
+
+**Q: Why not train one model on voice and gait together?**
+No public dataset has both from the same people. The old fusion network paired different people by UPDRS score (leakage). Late fusion keeps each model honest on correctly labelled data. The trade-off is that the combined accuracy is a simulation assuming independent errors.
+
+**Q: Why do you say “participant” instead of “patient”?**
+Results are not verified by a clinician, so the person assessed is a research participant, not a diagnosed patient.
+
 **Q: Why three tiers instead of yes/no?**
 A single threshold forces a trade-off: at 0.5 about 30% of healthy people are flagged. Tiers report only confident results and send borderline ones to re-recording or a clinician. Each tier's error rate is printed on the report.
 
@@ -701,7 +761,7 @@ For lab features, logistic regression on log features generalised best across da
 Age alone gave AUC 0.873. I used inverse-probability age-balancing weights per decade, evaluated on the age ≥ 55 subgroup (0.765), and checked that scores do not correlate with age in healthy speakers (−0.029).
 
 **Q: Why is the UPDRS estimate shown only when Detected?**
-The regressor was trained only on PD patients, so outputs for healthy voices are meaningless. In one test, a healthy profile produced 36.9 (“Moderate”). It is also no better than the mean (MAE 6.95 vs 7.13).
+The regressor was trained only on people with PD, so outputs for healthy voices are meaningless. In one test, a healthy profile produced 36.9 (“Moderate”). It is also no better than the mean (MAE 6.95 vs 7.13).
 
 **Q: What are AUC, sensitivity and specificity?**
 AUC is the probability that a random PD case scores higher than a random healthy one (0.5 = chance, 1 = perfect). Sensitivity is the fraction of PD flagged; specificity is the fraction of healthy correctly cleared.
@@ -716,7 +776,7 @@ It is free, open (ODbL), has no API key, and covers India. Nominatim is used wit
 Small, non-Indian training data. Future work: collect consented Indian recordings (multiple languages, smartphones), prospective clinical validation with neurologist diagnosis, repeated recordings per person (average over takes), calibrated RPDE/DFA/PPE, same-person voice + gait data, and on-device inference for privacy.
 
 **Q: What did you add beyond the original project?**
-See §6: browser audio conversion; extractor fixes; quality gates; two new screening models with tiers; new datasets (Sakar, Iyer); age-confound handling; leakage audit; formal report/PDF; delete; Progress; Indian care finder with map; recording guide with mic check; branding/UI; and tests (31 + 21).
+See §6: gait screening model and combined voice + gait verdict; browser audio conversion; extractor fixes; quality gates; two new screening models with tiers; new datasets (Sakar, Iyer); age-confound handling; leakage audit; formal report/PDF; delete; Progress; Indian care finder with map; recording guide with mic check; branding/UI; and tests (32 + 22).
 
 ---
 

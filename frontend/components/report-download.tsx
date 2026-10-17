@@ -16,9 +16,11 @@ import type { Assessment } from "@/lib/types";
 import {
   assessmentRows,
   featureRows,
+  gaitRows,
+  tierLabel,
   formatDateTime,
   LIMITATIONS,
-  patientRows,
+  participantRows,
   reportFindings,
   reportNumber,
   SEVERITY_NOTE,
@@ -106,6 +108,9 @@ function Rows({ rows }: { rows: [string, string][] }) {
 function AssessmentPdf({ report, findings }: { report: Assessment; findings: Findings }) {
   const features = featureRows(report);
   const half = Math.ceil(features.length / 2);
+  const gait = gaitRows(report);
+  const gaitHalf = Math.ceil(gait.length / 2);
+  let sectionNo = 3;
   const verdictColor = findings.tier ? { detected: "#b23b32", inconclusive: "#a46f00", not_detected: "#2f7d5b" }[findings.tier] : MUTED;
   const severityApplies = findings.tier === "detected";
   return (
@@ -117,14 +122,14 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
         </View>
         <Text style={styles.title}>VOICE ASSESSMENT REPORT</Text>
 
-        <View style={styles.section}><Text style={styles.heading}>1. Patient information</Text><Rows rows={patientRows(report)} /></View>
+        <View style={styles.section}><Text style={styles.heading}>1. Participant information</Text><Rows rows={participantRows(report)} /></View>
         <View style={styles.section}><Text style={styles.heading}>2. Assessment details</Text><Rows rows={assessmentRows(report)} /></View>
 
         <View style={styles.section} wrap={false}>
           <Text style={styles.heading}>3. Findings</Text>
           <View style={styles.findings}>
             <View style={styles.box}>
-              <Text style={styles.boxLabel}>Parkinson&apos;s voice screening</Text>
+              <Text style={styles.boxLabel}>{findings.combined ? "Combined voice + gait screening" : "Parkinson's voice screening"}</Text>
               <Text style={[styles.verdict, { color: verdictColor }]}>{findings.verdict}</Text>
               <Text style={styles.verdictSub}>{findings.headline}</Text>
               {findings.probability !== null && <>
@@ -136,7 +141,11 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
                 </View>
                 <View style={styles.barLegend}><Text>Model probability {(findings.probability * 100).toFixed(0)}%</Text><Text>Cut-offs {(findings.low * 100).toFixed(0)}% / {(findings.high * 100).toFixed(0)}%</Text></View>
               </>}
+              {findings.parts.map((part) => (
+                <Text key={part.label} style={[styles.verdictSub, { marginTop: 4 }]}>{part.label} model: {Math.round(part.probability * 100)}% · {tierLabel(part.tier)}</Text>
+              ))}
               {findings.reliability && <Text style={[styles.verdictSub, { marginTop: 8 }]}>{findings.reliability}</Text>}
+              {findings.gaitNote && <Text style={[styles.verdictSub, { marginTop: 6 }]}>{findings.gaitNote}</Text>}
             </View>
             <View style={styles.box}>
               <Text style={styles.boxLabel}>Estimated motor UPDRS (Part III)</Text>
@@ -149,7 +158,7 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
         </View>
 
         {features.length > 0 && <View style={styles.section} wrap={false}>
-          <Text style={styles.heading}>4. Acoustic measurements</Text>
+          <Text style={styles.heading}>{++sectionNo}. Acoustic measurements</Text>
           <View style={styles.table}>
             <View style={styles.tr}><Text style={styles.th}>Feature</Text><Text style={styles.th}>Value</Text><Text style={styles.th}>Feature</Text><Text style={styles.th}>Value</Text></View>
             {Array.from({ length: half }, (_, row) => (
@@ -161,8 +170,21 @@ function AssessmentPdf({ report, findings }: { report: Assessment; findings: Fin
           </View>
         </View>}
 
+        {gait.length > 0 && <View style={styles.section} wrap={false}>
+          <Text style={styles.heading}>{++sectionNo}. Gait measurements</Text>
+          <View style={styles.table}>
+            <View style={styles.tr}><Text style={styles.th}>Measure</Text><Text style={styles.th}>Value</Text><Text style={styles.th}>Measure</Text><Text style={styles.th}>Value</Text></View>
+            {Array.from({ length: gaitHalf }, (_, row) => (
+              <View style={styles.tr} key={row}>
+                <Text style={styles.td}>{gait[row][0]}</Text><Text style={styles.td}>{gait[row][1]}</Text>
+                <Text style={styles.td}>{gait[row + gaitHalf]?.[0] ?? ""}</Text><Text style={styles.td}>{gait[row + gaitHalf]?.[1] ?? ""}</Text>
+              </View>
+            ))}
+          </View>
+        </View>}
+
         <View style={styles.section} wrap={false}>
-          <Text style={styles.heading}>{features.length > 0 ? "5" : "4"}. Notes and limitations</Text>
+          <Text style={styles.heading}>{++sectionNo}. Notes and limitations</Text>
           <Text style={styles.note}>{pdfText(SEVERITY_NOTE)}</Text>
           <Text style={styles.note}>{pdfText(LIMITATIONS)}</Text>
         </View>

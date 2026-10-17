@@ -10,7 +10,7 @@ export type ExternalResource = { name: string; description: string; href: string
 export const INDIA_RESOURCES: ExternalResource[] = [
   {
     name: "Parkinson’s Disease and Movement Disorder Society (PDMDS)",
-    description: "Indian non-profit offering patient support groups, therapy programmes and awareness.",
+    description: "Indian non-profit offering support groups, therapy programmes and awareness.",
     href: "https://www.parkinsonssocietyindia.com/",
   },
   {

@@ -18,7 +18,8 @@ from pydantic import BaseModel, EmailStr, Field
 
 from .audio_features import AudioExtractionError, extract_audio_features
 from scripts.feature_contract import VOICE_FEATURE_COLUMNS
-from scripts.gait_contract import parse_gait_recording
+from scripts.gait_contract import parse_gait_full, parse_gait_recording
+from scripts.gait_features import GaitFeatureError, gait_features
 from scripts.inference import (
     ModelNotReadyError,
     _load_fusion_model,
@@ -28,7 +29,10 @@ from scripts.inference import (
     predict_fusion_features,
     predict_pd_screening,
     predict_pd_screening_audio,
+    predict_pd_screening_gait,
+    fuse_screenings,
     load_audio_classifier,
+    load_gait_classifier,
     predict_voice_features,
     updrs_severity_band,
     voice_model_mae,
@@ -201,6 +205,14 @@ def model_status() -> Dict[str, object]:
         audio_screening_available = False
         audio_screening_reason = str(exc)
 
+    gait_screening_available = True
+    gait_screening_reason = None
+    try:
+        load_gait_classifier(str(MODEL_ARTIFACTS_DIR / "pd_gait_classifier.pkl"))
+    except ModelNotReadyError as exc:
+        gait_screening_available = False
+        gait_screening_reason = str(exc)
+
     fusion_artifacts_available = False
     fusion_reason = "Fusion checkpoint and scaler artifacts are unavailable."
     try:
@@ -221,6 +233,8 @@ def model_status() -> Dict[str, object]:
             "reason": screening_reason,
             "audio_artifact_available": audio_screening_available,
             "audio_reason": audio_screening_reason,
+            "gait_artifact_available": gait_screening_available,
+            "gait_reason": gait_screening_reason,
         },
         "fusion": {
             "artifact_files_available": fusion_artifacts_available,
@@ -401,7 +415,7 @@ def parse_patient(
 ) -> Dict[str, object]:
     name = (full_name or "").strip()
     if not 1 <= len(name) <= 120:
-        raise HTTPException(status_code=422, detail="Enter the patient's full name (up to 120 characters).")
+        raise HTTPException(status_code=422, detail="Enter the participant's full name (up to 120 characters).")
     if age is not None and not 1 <= age <= 120:
         raise HTTPException(status_code=422, detail="Age must be between 1 and 120.")
     sex = (sex or "").strip().lower() or None
@@ -415,7 +429,8 @@ def parse_patient(
 
 def build_result(
     vocal_row: List[float], prediction: float, model: str, summary: str,
-    spectral: Optional[Dict[str, float]] = None, **extra: object
+    spectral: Optional[Dict[str, float]] = None, gait_data: Optional[bytes] = None,
+    gait_name: str = "", **extra: object
 ) -> Dict[str, object]:
     """Combine the UPDRS estimate with the voice screening classifier.
 
@@ -447,6 +462,25 @@ def build_result(
             screening = predict_pd_screening_audio(spectral, str(MODEL_ARTIFACTS_DIR / "pd_audio_classifier.pkl"))
         else:
             screening = predict_pd_screening([vocal_row], str(MODEL_ARTIFACTS_DIR / "pd_classifier.pkl"))
+        voice_part = _screening_summary(screening)
+        if gait_data is not None:
+            # Voice + gait: the headline verdict is the late fusion of both models.
+            try:
+                features = gait_features(parse_gait_full(gait_data, gait_name))
+                gait = predict_pd_screening_gait(features, str(MODEL_ARTIFACTS_DIR / "pd_gait_classifier.pkl"))
+                combined = fuse_screenings(screening, gait)
+                result.update({
+                    "screening_basis": "voice_gait",
+                    "voice_screening": voice_part,
+                    "gait_screening": _screening_summary(gait),
+                    "gait_features": features,
+                })
+                screening = combined
+            except (GaitFeatureError, ModelNotReadyError, ValueError, RuntimeError) as exc:
+                result["screening_basis"] = "voice"
+                result["gait_screening_unavailable_reason"] = str(exc)
+        else:
+            result["screening_basis"] = "voice"
         result.update({
             "screening_model": screening["model_version"],
             "pd_probability": screening["probability"],
@@ -459,6 +493,16 @@ def build_result(
     except (ModelNotReadyError, ValueError, RuntimeError) as exc:
         result["screening_unavailable_reason"] = str(exc)
     return result
+
+
+def _screening_summary(screening: Dict[str, object]) -> Dict[str, object]:
+    return {
+        "model": screening["model_version"],
+        "probability": screening["probability"],
+        "tier": screening["tier"],
+        "low_threshold": screening["low_threshold"],
+        "high_threshold": screening["high_threshold"],
+    }
 
 
 async def read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
@@ -588,6 +632,8 @@ async def create_assessment(
                 "Exploratory research estimate from validated voice and gait windows; not a diagnosis or clinical assessment.",
                 spectral=extraction.spectral,
                 from_audio=True,
+                gait_data=gait_data,
+                gait_name=gait_name,
                 gait_window="first 200 rows of the validated 19-column recording",
             )
         except AudioExtractionError as exc:
@@ -750,6 +796,8 @@ async def create_manual_assessment(
         prediction,
         "dual-branch-fusion-updrs-v1" if modality == "voice_gait" else VOICE_MODEL_VERSION,
         "Exploratory research estimate from the submitted 16-feature vocal contract; not a diagnosis or clinical assessment.",
+        gait_data=gait_data if modality == "voice_gait" else None,
+        gait_name=(gait.filename or "").lower() if gait is not None else "",
     )
     created_at = utc_now().isoformat()
     with connect() as db:

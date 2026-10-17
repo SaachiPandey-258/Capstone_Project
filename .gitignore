@@ -34,6 +34,7 @@ frontend/.next/
 # Trained models used by the portal are small and committed so the app runs after cloning
 !models/pd_audio_classifier.pkl
 !models/pd_classifier.pkl
+!models/pd_gait_classifier.pkl
 !models/updrs_regressor.pkl
 !models/fusion_model.pt
 !models/fusion_vocal_scaler.joblib

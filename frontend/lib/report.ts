@@ -18,6 +18,8 @@ const MODEL_LABELS: Record<string, string> = {
   "logistic-pd-screen-v2": "Logistic regression screening classifier",
   "logistic-pd-screen-v3": "Logistic regression on lab voice measures (284 speakers)",
   "rf-spectral-pd-screen-v4": "Random forest on spectral voice measures (phone recordings)",
+  "svm-gait-pd-screen-v1": "SVM on stride-timing gait measures (165 people)",
+  "late-fusion-mean-v1": "Combined voice + gait (average of both model probabilities)",
 };
 
 export function reportNumber(report: Assessment) {
@@ -34,10 +36,10 @@ export function modelLabel(model: unknown) {
   return typeof model === "string" ? MODEL_LABELS[model] ?? model : "—";
 }
 
-export function patientRows(report: Assessment): [string, string][] {
+export function participantRows(report: Assessment): [string, string][] {
   const patient = report.patient;
   return [
-    ["Patient name", patient?.full_name || "Not recorded"],
+    ["Name", patient?.full_name || "Not recorded"],
     ["Age", patient?.age != null ? `${patient.age} years` : "Not recorded"],
     ["Sex", patient?.sex ? SEX_LABELS[patient.sex] : "Not recorded"],
     ["Location", patient?.location || "Not recorded"],
@@ -51,7 +53,9 @@ export function assessmentRows(report: Assessment): [string, string][] {
     ["Input pathway", report.modality === "voice_gait" ? "Voice + gait" : "Voice only"],
     ["Voice source", fromAudio ? `Audio recording (${report.duration_seconds} s), features extracted automatically` : "Submitted acoustic feature values"],
     ["Severity model", modelLabel(report.result?.model)],
-    ["Screening model", report.result?.screening_model ? modelLabel(report.result.screening_model) : "Unavailable"],
+    ["Screening model", report.result?.screening_basis === "voice_gait" && report.result.voice_screening && report.result.gait_screening
+      ? `Combined: ${modelLabel(report.result.voice_screening.model)} + ${modelLabel(report.result.gait_screening.model)}`
+      : report.result?.screening_model ? modelLabel(report.result.screening_model) : "Unavailable"],
   ];
 }
 
@@ -69,7 +73,20 @@ export type Findings = {
   headline: string;
   interpretation: string;
   reliability: string | null;
+  combined: boolean;
+  parts: { label: string; probability: number; tier: ScreeningTier; low: number; high: number }[];
+  gaitNote: string | null;
 };
+
+const TIER_LABELS: Record<ScreeningTier, string> = {
+  detected: "Detected",
+  inconclusive: "Inconclusive",
+  not_detected: "Not detected",
+};
+
+export function tierLabel(tier: ScreeningTier) {
+  return TIER_LABELS[tier];
+}
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;
 
@@ -116,7 +133,30 @@ export function reportFindings(report: Assessment): Findings | null {
       reliability = `In testing, ${pct(errorRates.pd_inconclusive)} of people with Parkinson’s and ${pct(errorRates.healthy_inconclusive)} of healthy speakers received an inconclusive result.`;
     }
   }
-  return { score, max, mae, band, tier, probability, low, high, errorRates, verdict, headline, interpretation, reliability };
+  const voicePart = result.voice_screening;
+  const gaitPart = result.gait_screening;
+  const combined = result.screening_basis === "voice_gait" && Boolean(voicePart && gaitPart);
+  const parts = combined && voicePart && gaitPart ? [
+    { label: "Voice", probability: voicePart.probability, tier: voicePart.tier, low: voicePart.low_threshold, high: voicePart.high_threshold },
+    { label: "Gait", probability: gaitPart.probability, tier: gaitPart.tier, low: gaitPart.low_threshold, high: gaitPart.high_threshold },
+  ] : [];
+  if (combined && voicePart && gaitPart) {
+    headline = headline.replace("Voice markers", "Voice and gait markers").replace("No voice markers", "No voice or gait markers").replace("Voice markers are borderline", "Voice and gait markers are borderline");
+    if (reliability) {
+      reliability = reliability
+        .replace(/^In testing on speakers not seen during training,|^In testing,/, "In simulated voice + gait testing,")
+        .replace("healthy speakers", "healthy people");
+    }
+    const combinedText = interpretation
+      .replace("The screening model found acoustic markers", "The combined screening found voice and gait markers")
+      .replace("The screening model did not find acoustic markers", "The combined screening did not find voice or gait markers")
+      .replace("A voice screen cannot rule out", "A screen cannot rule out");
+    interpretation = `This result combines the voice model (${pct(voicePart.probability)}) and the gait model (${pct(gaitPart.probability)}) by averaging their probabilities. ${combinedText}`;
+  }
+  const gaitNote = typeof result.gait_screening_unavailable_reason === "string"
+    ? `Gait could not be screened (${result.gait_screening_unavailable_reason}); the result is based on voice only.`
+    : null;
+  return { score, max, mae, band, tier, probability, low, high, errorRates, verdict, headline, interpretation, reliability, combined, parts, gaitNote };
 }
 
 export function featureRows(report: Assessment): [string, string][] {
@@ -129,4 +169,10 @@ export function featureRows(report: Assessment): [string, string][] {
 
 export const SEVERITY_NOTE = "Severity bands follow published MDS-UPDRS Part III cut-offs (mild ≤ 32, moderate 33–58, severe ≥ 59; Martínez-Martín et al., 2015). They describe motor severity and are not Hoehn & Yahr stages.";
 
-export const LIMITATIONS = "The screening classifier was trained on 951 sustained-vowel recordings from 284 speakers in two research datasets and evaluated on speakers it had not seen; the severity model was trained on 42 people with early-stage Parkinson’s and is no more accurate than the cohort average for new people. Neither model is clinically validated, and phone or laptop microphones differ from research recording setups. These are research outputs only — not a diagnosis, clinical score, or substitute for assessment by a qualified clinician.";
+export const LIMITATIONS = "The screening classifier was trained on 951 sustained-vowel recordings from 284 speakers in two research datasets and evaluated on speakers it had not seen; the severity model was trained on 42 people with early-stage Parkinson’s and is no more accurate than the cohort average for new people. With gait data, a separate gait model (165 people) is combined with the voice model by averaging their probabilities; that combination was evaluated by simulation, not on people who gave both. No model is clinically validated, and phone or laptop microphones differ from research recording setups. These are research outputs only — not a diagnosis, clinical score, or substitute for assessment by a qualified clinician.";
+
+export function gaitRows(report: Assessment): [string, string][] {
+  const features = report.result?.gait_features;
+  if (!features) return [];
+  return Object.entries(features).map(([name, value]) => [name, Number(value).toPrecision(4)]);
+}

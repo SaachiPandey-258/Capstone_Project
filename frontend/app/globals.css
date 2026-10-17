@@ -1193,3 +1193,10 @@ h2, h3 { font-weight: 700; }
 .rejected-icon { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; color: #8a5f00; background: #fbf1da; }
 .rejected-tips { display: grid; gap: 6px; margin: 0; padding-left: 80px; color: #46587a; font-size: .9rem; }
 .rejected-card .button-row { margin: 0; }
+
+.screening-parts { display: grid; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px dashed #d6e0ec; }
+.screening-part { display: grid; grid-template-columns: 92px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: .76rem; }
+.screening-part-label { color: #46587a; font-weight: 700; }
+.screening-part-value { color: #33445e; font-weight: 600; white-space: nowrap; }
+.mini-track { position: relative; height: 6px; border-radius: 99px; background: linear-gradient(90deg, #cfe8da 0 var(--low), #f4e3b5 var(--low) var(--high), #f2cfca var(--high) 100%); }
+.mini-marker { position: absolute; top: 50%; width: 11px; height: 11px; border: 2px solid #fff; border-radius: 50%; background: #1b2b44; box-shadow: 0 1px 3px rgba(0,0,0,.3); transform: translate(-50%, -50%); }

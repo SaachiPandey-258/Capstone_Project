@@ -75,6 +75,12 @@ python -m scripts.train_classifier
 python -m scripts.extract_audio_dataset   # -> data/iyer2023_features.csv
 python -m scripts.train_audio_classifier  # -> models/pd_audio_classifier.pkl
 
+# Gait screening model + voice/gait combined verdict (late fusion).
+# PhysioNet gait data: 306 recordings, 165 people (93 PD, 72 controls); SVM on
+# stride-timing variability/asymmetry, AUC ~0.80 per person. With gait, the report
+# shows one combined verdict (average of voice and gait probabilities; simulated AUC ~0.84).
+python -m scripts.train_gait_classifier   # -> models/pd_gait_classifier.pkl
+
 # Optional, computationally heavier research experiment. Generates
 # fusion_model.pt, fusion_vocal_scaler.joblib, and fusion_metrics.json.
 python -m scripts.train_fusion

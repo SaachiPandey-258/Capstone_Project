@@ -73,3 +73,8 @@ def log_perturbation_features(values: Any) -> np.ndarray:
     matrix = np.asarray(values, dtype=np.float64).copy()
     matrix[:, :12] = np.log(np.maximum(matrix[:, :12], 1e-7))
     return matrix
+
+
+def log_positive(values: Any) -> np.ndarray:
+    """Natural log of strictly positive features (gait timings), floored at 1e-3."""
+    return np.log(np.maximum(np.asarray(values, dtype=np.float64), 1e-3))

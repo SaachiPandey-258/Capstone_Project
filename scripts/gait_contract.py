@@ -51,6 +51,23 @@ def parse_gait_recording(contents: bytes, filename: str) -> tuple[np.ndarray, in
     return first_gait_window(recording), len(rows)
 
 
+def parse_gait_full(contents: bytes, filename: str) -> np.ndarray:
+    """Validated full recording (all rows), used for stride-timing features."""
+    window, _rows = parse_gait_recording(contents, filename)
+    del window
+    text = contents.decode("utf-8-sig")
+    rows = []
+    for raw_line in text.splitlines():
+        cells = raw_line.split(",") if filename.lower().endswith(".csv") else raw_line.split()
+        try:
+            values = [float(cell.strip()) for cell in cells]
+        except ValueError:
+            continue
+        if len(values) == GAIT_COLUMNS:
+            rows.append(values)
+    return np.asarray(rows, dtype=np.float64)
+
+
 def validate_gait_window(window: object) -> np.ndarray:
     try:
         matrix = np.asarray(window, dtype=np.float32)

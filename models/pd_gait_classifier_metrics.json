@@ -1,0 +1,66 @@
+{
+  "model": "svm-gait-pd-screen-v1",
+  "data": "PhysioNet Gait in Parkinson's Disease (Ga, Ju, Si studies)",
+  "protocol": "StratifiedGroupKFold by person (5 folds, 10 repeats); leave-one-study-out; refit on all",
+  "n_recordings": 306,
+  "n_people": 165,
+  "thresholds": {
+    "not_detected_below": 0.51,
+    "detected_at_or_above": 0.8
+  },
+  "metrics": {
+    "roc_auc_recording": 0.7936661926046323,
+    "roc_auc_person": 0.8008064516129032,
+    "leave_one_study_out_roc_auc": {
+      "Ga": 0.732982456140351,
+      "Ju": 0.7392307692307692,
+      "Si": 0.7142857142857143
+    },
+    "tiers": {
+      "pd_detected": 0.5565420560747664,
+      "pd_inconclusive": 0.2953271028037383,
+      "pd_not_detected": 0.14813084112149533,
+      "healthy_detected": 0.13478260869565217,
+      "healthy_inconclusive": 0.3217391304347826,
+      "healthy_not_detected": 0.5434782608695652
+    }
+  },
+  "fusion": {
+    "method": "mean of voice and gait probabilities",
+    "version": "late-fusion-mean-v1",
+    "by_voice_model": {
+      "rf-spectral-pd-screen-v4": {
+        "roc_auc": 0.8448386666666666,
+        "voice_alone_roc_auc": 0.7688312222222222,
+        "gait_alone_roc_auc": 0.7690252222222222,
+        "low_threshold": 0.53,
+        "high_threshold": 0.65,
+        "tier_rates": {
+          "pd_detected": 0.6563333333333333,
+          "pd_inconclusive": 0.19633333333333333,
+          "pd_not_detected": 0.14733333333333334,
+          "healthy_detected": 0.13966666666666666,
+          "healthy_inconclusive": 0.226,
+          "healthy_not_detected": 0.6343333333333333
+        }
+      },
+      "logistic-pd-screen-v3": {
+        "roc_auc": 0.8359147777777778,
+        "voice_alone_roc_auc": 0.7508991111111112,
+        "gait_alone_roc_auc": 0.7690252222222222,
+        "low_threshold": 0.52,
+        "high_threshold": 0.64,
+        "tier_rates": {
+          "pd_detected": 0.6316666666666667,
+          "pd_inconclusive": 0.224,
+          "pd_not_detected": 0.14433333333333334,
+          "healthy_detected": 0.145,
+          "healthy_inconclusive": 0.211,
+          "healthy_not_detected": 0.644
+        }
+      }
+    }
+  },
+  "artifact_sha256": "f7b448cb3a0694709648867ab485fc45af6cd2e4a04e0fdf3c6ed1f5e702ec44",
+  "limitations": "Gait model trained on 306 walking recordings from 165 people (93 with Parkinson's, 72 controls) in three research studies with foot-pressure insoles. Combined voice + gait accuracy is a simulation that pairs different people from the same group and assumes the two signals are independent; it has not been measured on people who gave both. Research output, not a diagnosis."
+}

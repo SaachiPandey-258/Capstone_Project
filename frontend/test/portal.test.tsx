@@ -436,6 +436,37 @@ describe("reports and progress analytics", () => {
     expect(screen.getByText(/± 7/)).toBeInTheDocument();
   });
 
+  it("shows one combined verdict for voice + gait with both contributing models", () => {
+    const combined: Assessment = {
+      ...unavailable,
+      modality: "voice_gait",
+      status: "completed",
+      unavailable_reason: "",
+      patient: { full_name: "Asha Rao", age: 64, sex: "female", location: "Pune, India" },
+      result: {
+        model: "dual-branch-fusion-updrs-v1",
+        prediction: 24.0,
+        screening_basis: "voice_gait",
+        screening_model: "late-fusion-mean-v1",
+        pd_probability: 0.7,
+        screening_tier: "detected",
+        pd_low_threshold: 0.53,
+        pd_high_threshold: 0.65,
+        voice_screening: { model: "rf-spectral-pd-screen-v4", probability: 0.5, tier: "inconclusive", low_threshold: 0.44, high_threshold: 0.61 },
+        gait_screening: { model: "svm-gait-pd-screen-v1", probability: 0.9, tier: "detected", low_threshold: 0.51, high_threshold: 0.8 },
+        gait_features: { "Stride time (s)": 1.07, "Swing time CV (%)": 5.4 },
+      },
+    };
+    render(<ReportView report={combined} />);
+    expect(screen.getByText("Combined voice + gait screening")).toBeInTheDocument();
+    expect(screen.getByText("Detected", { selector: ".detection-verdict" })).toBeInTheDocument();
+    expect(screen.getByText("50% · Inconclusive")).toBeInTheDocument();
+    expect(screen.getByText("90% · Detected")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Gait measurements/ })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /Participant information/ })).toBeInTheDocument();
+    expect(screen.queryByText(/patient/i)).not.toBeInTheDocument();
+  });
+
   it("explains why an empty progress history cannot show a trend", () => {
     render(<ProgressView assessments={[]} />);
     expect(screen.getByRole("heading", { name: "Not enough comparable data yet" })).toBeInTheDocument();

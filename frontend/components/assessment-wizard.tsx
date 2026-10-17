@@ -282,7 +282,7 @@ export function AssessmentWizard() {
   const validFeatures = values.every((value) => value.trim() !== "" && Number.isFinite(Number(value)));
   const ageNumber = patientAge.trim() === "" ? null : Number(patientAge);
   const patientError = !patientName.trim()
-    ? "Enter the patient's full name."
+    ? "Enter the participant's full name."
     : ageNumber !== null && (!Number.isInteger(ageNumber) || ageNumber < 1 || ageNumber > 120)
       ? "Age must be a whole number between 1 and 120."
       : "";
@@ -384,7 +384,7 @@ export function AssessmentWizard() {
 
   return <div className="wizard">
     <section className="wizard-card">
-      <div className="wizard-step"><span>01</span><div><h2>Patient details and consent</h2><p>These details appear on the generated report. Only the name is required.</p></div></div>
+      <div className="wizard-step"><span>01</span><div><h2>Participant details and consent</h2><p>Details of the person being assessed. They appear on the generated report; only the name is required.</p></div></div>
       <div className="patient-grid">
         <label className="patient-name">Full name<input autoComplete="name" value={patientName} onChange={(event) => setPatientName(event.target.value)} placeholder="e.g. Asha Rao" /></label>
         <label>Age<input type="number" inputMode="numeric" min="1" max="120" value={patientAge} onChange={(event) => setPatientAge(event.target.value)} placeholder="Years" /></label>
@@ -402,10 +402,10 @@ export function AssessmentWizard() {
     </section>
 
     <section className="wizard-card">
-      <div className="wizard-step"><span>02</span><div><h2>Assessment type</h2><p>Voice-only uses 16 acoustic features. Voice + gait adds a validated 200×19 foot-sensor recording.</p></div></div>
+      <div className="wizard-step"><span>02</span><div><h2>Assessment type</h2><p>Voice only screens your voice. Voice + gait also screens a foot-pressure walking recording and combines both into one result.</p></div></div>
       <div className="choice-grid">
         <label className={modality === "voice" ? "choice-card selected" : "choice-card"}><input aria-label="Voice-only assessment" type="radio" name="modality" checked={modality === "voice"} onChange={() => setModality("voice")} /><span><strong>Voice only</strong><small>Sustained vowel recording or feature values</small></span></label>
-        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait</strong><small>Fusion model with a gait sensor file</small></span></label>
+        <label className={modality === "voice_gait" ? "choice-card selected" : "choice-card"}><input aria-label="Voice and gait assessment" type="radio" name="modality" checked={modality === "voice_gait"} onChange={() => setModality("voice_gait")} /><span><strong>Voice + gait</strong><small>One combined result from voice and walking data</small></span></label>
       </div>
     </section>
 
@@ -481,7 +481,7 @@ export function AssessmentWizard() {
     </section>
 
     {modality === "voice_gait" && <section className="wizard-card">
-      <div className="wizard-step"><span>04</span><div><h2>Gait data</h2><p>At least 200 rows of 19 columns: time, eight left sensors, eight right sensors, and two total-force columns. The first 200 rows are used.</p></div></div>
+      <div className="wizard-step"><span>04</span><div><h2>Gait data</h2><p>A foot-pressure walking recording at 100 Hz with 19 columns: time, eight left sensors, eight right sensors, and two total-force columns. At least 20 seconds of steady walking (about 2,000 rows) is needed for the gait screening; the files in <code>data/gait-in-parkinsons-disease-1.0.0</code> use this format.</p></div></div>
       <label className="file-picker">Choose gait file<input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(event) => void selectGait(event.target.files?.[0])} /></label>
       {gait && <p className="file-selected">{gait.name} · {(gait.size / 1024).toFixed(1)} KB</p>}
       {gaitPreview.length > 0 && <div className="preview-wrap"><p className="field-hint">Validated preview (first rows)</p><table className="preview-table"><tbody>{gaitPreview.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={`${index}-${cellIndex}`}>{cell}</td>)}</tr>)}</tbody></table></div>}
@@ -490,7 +490,7 @@ export function AssessmentWizard() {
 
     <section className="submission-panel"><div><strong>Analysis availability</strong><p>{availability?.voice.artifact_available ? "The local research voice artifact is available for this exact 16-feature input." : "A compatible local voice artifact is not currently available; your submission will be saved as unavailable without a score."} {modality === "voice_gait" && (availability?.fusion.portal_inference_available ? "Validated fusion artifacts are available." : availability?.fusion.reason || "Fusion artifacts are unavailable.")}</p></div>
       {submitError && <ErrorMessage>{submitError}</ErrorMessage>}<button className="button" type="button" onClick={() => void submit()} disabled={!canSubmit}>{submitting ? "Submitting securely…" : "Submit assessment"}</button>
-      {!canSubmit && !submitting && <span className="field-hint">Required: patient name, consent, {usesAudio ? "a 3–60 second recording" : "all 16 finite feature values"}{modality === "voice_gait" ? ", and a valid gait file" : ""}.</span>}
+      {!canSubmit && !submitting && <span className="field-hint">Required: participant name, consent, {usesAudio ? "a 3–60 second recording" : "all 16 finite feature values"}{modality === "voice_gait" ? ", and a valid gait file" : ""}.</span>}
     </section>
   </div>;
 }

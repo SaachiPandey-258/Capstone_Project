@@ -257,6 +257,61 @@ def test_recorded_audio_uses_the_audio_screening_model(client, tmp_path):
     assert result["pd_low_threshold"] == 0.44
 
 
+def write_gait_screening_artifact(directory):
+    from sklearn.linear_model import LogisticRegression as GaitModel
+    from scripts.gait_features import GAIT_FEATURE_COLUMNS
+
+    directory.mkdir(parents=True, exist_ok=True)
+    features = np.random.default_rng(1).normal(1.0, 0.2, size=(8, len(GAIT_FEATURE_COLUMNS)))
+    model = make_pipeline(StandardScaler(), GaitModel()).fit(features, [0, 1] * 4)
+    fusion = {"low_threshold": 0.4, "high_threshold": 0.6, "tier_rates": {"healthy_detected": 0.14}, "roc_auc": 0.84}
+    joblib.dump({
+        "model": model,
+        "feature_columns": list(GAIT_FEATURE_COLUMNS),
+        "feature_min": [0.0] * len(GAIT_FEATURE_COLUMNS),
+        "feature_max": [1000.0] * len(GAIT_FEATURE_COLUMNS),
+        "metadata": {
+            "model_version": "svm-gait-pd-screen-v1", "low_threshold": 0.5, "high_threshold": 0.8,
+            "fusion": {"logistic-pd-screen-v3": fusion, "rf-spectral-pd-screen-v4": fusion},
+        },
+    }, directory / "pd_gait_classifier.pkl")
+
+
+def test_voice_and_gait_produce_one_combined_screening(client, tmp_path):
+    import shutil
+    from pathlib import Path as _Path
+
+    repo = _Path(api.__file__).resolve().parent.parent
+    models = tmp_path / "models"
+    write_voice_artifact(models)
+    features = write_screening_artifact(models)
+    write_gait_screening_artifact(models)
+    for name in ("fusion_model.pt", "fusion_vocal_scaler.joblib"):
+        shutil.copy(repo / "models" / name, models / name)
+    token = create_account(client)
+    gait_file = repo / "data" / "gait-in-parkinsons-disease-1.0.0" / "GaPt03_01.txt"
+    response = client.post(
+        "/api/assessments/manual",
+        headers=auth(token),
+        data={
+            "consent": "true", "modality": "voice_gait",
+            "feature_columns": json.dumps(list(VOICE_FEATURE_COLUMNS)),
+            "features": json.dumps(features[3].tolist()),
+            "patient_name": "Test Participant",
+        },
+        files={"gait": ("GaPt03_01.txt", gait_file.read_bytes(), "text/plain")},
+    )
+    assert response.status_code == 201, response.text
+    result = response.json()["result"]
+    assert result["screening_basis"] == "voice_gait"
+    assert result["screening_model"] == "late-fusion-mean-v1"
+    voice, gait = result["voice_screening"], result["gait_screening"]
+    assert result["pd_probability"] == pytest.approx((voice["probability"] + gait["probability"]) / 2)
+    assert result["pd_low_threshold"] == 0.4 and result["pd_high_threshold"] == 0.6
+    assert gait["model"] == "svm-gait-pd-screen-v1"
+    assert result["gait_features"]["Stride time (s)"] > 0
+
+
 def test_mostly_unvoiced_recording_is_rejected_without_a_score(client, tmp_path):
     token = create_account(client)
     write_voice_artifact(tmp_path / "models")

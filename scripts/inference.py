@@ -197,6 +197,7 @@ def predict_fusion_features(
 
 PD_CLASSIFIER_VERSION = "logistic-pd-screen-v3"
 AUDIO_CLASSIFIER_VERSION = "rf-spectral-pd-screen-v4"
+GAIT_CLASSIFIER_VERSION = "svm-gait-pd-screen-v1"
 
 # Approximate motor-severity bands for UPDRS Part III (Martínez-Martín et al.,
 # 2015 cut-offs: mild <= 32, moderate 33-58, severe >= 59). These are severity
@@ -279,4 +280,54 @@ def _screen(bundle: dict[str, Any], matrix: np.ndarray) -> dict[str, Any]:
         "low_threshold": low,
         "high_threshold": high,
         "tier_rates": metadata.get("tier_rates"),
+    }
+
+
+def load_gait_classifier(artifact_path: str) -> dict[str, Any]:
+    """Gait screening model (stride-timing features) with voice+gait fusion settings."""
+    if __package__:
+        from .gait_features import GAIT_FEATURE_COLUMNS
+    else:
+        from gait_features import GAIT_FEATURE_COLUMNS
+    bundle = _check_screening_bundle(_load_pipeline_bundle(
+        artifact_path, GAIT_CLASSIFIER_VERSION, "Gait screening classifier", list(GAIT_FEATURE_COLUMNS),
+    ))
+    if not isinstance(bundle["metadata"].get("fusion"), dict):
+        raise ModelNotReadyError("Gait screening classifier has no fusion settings.")
+    return bundle
+
+
+def predict_pd_screening_gait(features: Mapping[str, Any], artifact_path: str) -> dict[str, Any]:
+    """Screen one walking recording from its stride-timing features."""
+    bundle = load_gait_classifier(artifact_path)
+    columns = bundle["feature_columns"]
+    try:
+        row = [[float(features[column]) for column in columns]]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("Gait features are missing or invalid.") from exc
+    matrix = require_finite_matrix(row, name="Gait features", columns=len(columns))
+    screening = _screen(bundle, np.clip(matrix, bundle["feature_min"], bundle["feature_max"]))
+    screening["fusion"] = bundle["metadata"]["fusion"]
+    return screening
+
+
+def fuse_screenings(voice: Mapping[str, Any], gait: Mapping[str, Any]) -> dict[str, Any]:
+    """Late fusion: mean of voice and gait probabilities with calibrated thresholds.
+
+    Thresholds and error rates come from the gait bundle's fusion settings for
+    the specific voice model that produced the voice probability.
+    """
+    settings = gait["fusion"].get(voice["model_version"])
+    if not isinstance(settings, Mapping):
+        raise ModelNotReadyError("No voice + gait fusion settings exist for this voice model.")
+    probability = (float(voice["probability"]) + float(gait["probability"])) / 2
+    low, high = float(settings["low_threshold"]), float(settings["high_threshold"])
+    return {
+        "model_version": "late-fusion-mean-v1",
+        "probability": probability,
+        "tier": screening_tier(probability, low, high),
+        "low_threshold": low,
+        "high_threshold": high,
+        "tier_rates": settings.get("tier_rates"),
+        "roc_auc": settings.get("roc_auc"),
     }

@@ -74,7 +74,7 @@ function AssessmentsContent() {
           <VoiceIllustration />
           <div>
             <h2>No assessments yet</h2>
-            <p>A voice assessment takes about two minutes: enter the patient’s details, record a steady “aaah” for 5–10 seconds, and your report is ready straight away.</p>
+            <p>A voice assessment takes about two minutes: enter the participant’s details, record a steady “aaah” for 5–10 seconds, and your report is ready straight away.</p>
             <div className="button-row">
               <Link className="button" href="/assessment/new"><Mic size={16} /> Start your first assessment</Link>
               <Link className="text-link" href="/guide">See the recording guide</Link>

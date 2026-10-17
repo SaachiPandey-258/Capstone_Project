@@ -6,11 +6,13 @@ import {
   assessmentRows,
   featureRows,
   formatDateTime,
+  gaitRows,
   LIMITATIONS,
-  patientRows,
+  participantRows,
   reportFindings,
   reportNumber,
   SEVERITY_NOTE,
+  tierLabel,
 } from "@/lib/report";
 
 export function ReportView({ report }: { report: Assessment }) {
@@ -24,6 +26,8 @@ export function ReportView({ report }: { report: Assessment }) {
   }
   const features = featureRows(report);
   const half = Math.ceil(features.length / 2);
+  const gait = gaitRows(report);
+  let sectionNo = 3;
   const detectionClass = findings.tier === "detected" ? "positive" : findings.tier === "not_detected" ? "negative" : findings.tier === "inconclusive" ? "borderline" : "neutral";
   const severityApplies = findings.tier === "detected";
   return <article className="formal-report" aria-labelledby="report-heading">
@@ -37,8 +41,8 @@ export function ReportView({ report }: { report: Assessment }) {
     <h2 id="report-heading" className="formal-report-title">Voice Assessment Report</h2>
 
     <section className="formal-section">
-      <h3>1. Patient information</h3>
-      <dl className="formal-grid">{patientRows(report).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      <h3>1. Participant information</h3>
+      <dl className="formal-grid">{participantRows(report).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
     </section>
 
     <section className="formal-section">
@@ -50,7 +54,7 @@ export function ReportView({ report }: { report: Assessment }) {
       <h3>3. Findings</h3>
       <div className="findings-grid">
         <div className={`detection-card ${detectionClass}`}>
-          <span className="detection-label">Parkinson’s voice screening</span>
+          <span className="detection-label">{findings.combined ? "Combined voice + gait screening" : "Parkinson’s voice screening"}</span>
           <strong className="detection-verdict">{findings.verdict}</strong>
           <span className="detection-headline">{findings.headline}</span>
           {findings.probability !== null && <div className="probability">
@@ -60,7 +64,17 @@ export function ReportView({ report }: { report: Assessment }) {
             <div className="probability-scale"><span>Not detected</span><span>Inconclusive</span><span>Detected</span></div>
             <div className="probability-legend"><span>Model probability <strong>{(findings.probability * 100).toFixed(0)}%</strong></span><span>Cut-offs {(findings.low * 100).toFixed(0)}% / {(findings.high * 100).toFixed(0)}%</span></div>
           </div>}
+          {findings.parts.length > 0 && <div className="screening-parts" aria-label="Contributing models">
+            {findings.parts.map((part) => <div key={part.label} className={`screening-part tier-${part.tier}`}>
+              <span className="screening-part-label">{part.label} model</span>
+              <div className="mini-track" style={{ "--low": `${part.low * 100}%`, "--high": `${part.high * 100}%` } as CSSProperties}>
+                <span className="mini-marker" style={{ left: `${part.probability * 100}%` }} />
+              </div>
+              <span className="screening-part-value">{Math.round(part.probability * 100)}% · {tierLabel(part.tier)}</span>
+            </div>)}
+          </div>}
           {findings.reliability && <p className="detection-reliability">{findings.reliability}</p>}
+          {findings.gaitNote && <p className="field-hint">{findings.gaitNote}</p>}
         </div>
         <div className="gauge-card">
           <span className="detection-label">Estimated motor UPDRS (Part III)</span>
@@ -75,7 +89,7 @@ export function ReportView({ report }: { report: Assessment }) {
     </section>
 
     {features.length > 0 && <section className="formal-section">
-      <h3>4. Acoustic measurements</h3>
+      <h3>{++sectionNo}. Acoustic measurements</h3>
       <div className="formal-table-wrap"><table className="formal-table">
         <thead><tr><th>Feature</th><th>Value</th><th>Feature</th><th>Value</th></tr></thead>
         <tbody>{Array.from({ length: half }, (_, row) => <tr key={row}>
@@ -85,8 +99,19 @@ export function ReportView({ report }: { report: Assessment }) {
       </table></div>
     </section>}
 
+    {gait.length > 0 && <section className="formal-section">
+      <h3>{++sectionNo}. Gait measurements</h3>
+      <div className="formal-table-wrap"><table className="formal-table">
+        <thead><tr><th>Measure</th><th>Value</th><th>Measure</th><th>Value</th></tr></thead>
+        <tbody>{Array.from({ length: Math.ceil(gait.length / 2) }, (_, row) => {
+          const right = gait[row + Math.ceil(gait.length / 2)];
+          return <tr key={row}><td>{gait[row][0]}</td><td>{gait[row][1]}</td><td>{right?.[0] ?? ""}</td><td>{right?.[1] ?? ""}</td></tr>;
+        })}</tbody>
+      </table></div>
+    </section>}
+
     <section className="formal-section formal-notes">
-      <h3>{features.length > 0 ? "5" : "4"}. Notes and limitations</h3>
+      <h3>{++sectionNo}. Notes and limitations</h3>
       <p>{SEVERITY_NOTE}</p>
       <p>{LIMITATIONS}</p>
     </section>

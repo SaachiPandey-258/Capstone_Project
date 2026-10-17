@@ -6,8 +6,8 @@ const PIPELINE = [
   { icon: Mic, title: "Record", body: "A steady “aaah” for 5–10 seconds in your browser, or upload an audio file." },
   { icon: ShieldCheck, title: "Quality check", body: "We keep only the steadiest stretch of voice and reject recordings that are too short or too noisy." },
   { icon: AudioWaveform, title: "Measure", body: "Praat measures jitter, shimmer and HNR, plus voice clarity (CPPS), pitch steadiness and spectral shape." },
-  { icon: Gauge, title: "Screen", body: "A model trained on phone recordings gives one of three results: Not detected, Inconclusive or Detected." },
-  { icon: FileText, title: "Report", body: "A formal report with patient details, findings and limitations — downloadable as PDF." },
+  { icon: Gauge, title: "Screen", body: "Voice and (optionally) gait models each score your input; with both, their probabilities are combined into one result: Not detected, Inconclusive or Detected." },
+  { icon: FileText, title: "Report", body: "A formal report with participant details, findings and limitations — downloadable as PDF." },
   { icon: LineChart, title: "Track", body: "Repeat assessments over weeks and follow your measures on the Progress page." },
 ];
 
@@ -44,6 +44,7 @@ export default function HowItWorksPage() {
           <ul className="accuracy-list">
             <li><strong>55%</strong> of people with Parkinson’s were flagged “Detected”; 15% were “Not detected”.</li>
             <li><strong>13%</strong> of healthy people were wrongly flagged “Detected”; 53% were “Not detected”.</li>
+            <li><strong>Voice + gait combined:</strong> AUC 0.84 vs 0.77 for either alone — 66% of people with Parkinson’s flagged “Detected” with 14% of healthy people wrongly flagged (simulated pairing, see manual).</li>
           </ul>
           <p className="muted">It is a research screening aid with modest accuracy — not a medical device.</p>
         </article>

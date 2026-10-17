@@ -26,6 +26,14 @@ export type PatientDetails = {
   location: string | null;
 };
 
+export type ScreeningPart = {
+  model: string;
+  probability: number;
+  tier: ScreeningTier;
+  low_threshold: number;
+  high_threshold: number;
+};
+
 export type ScreeningTier = "detected" | "inconclusive" | "not_detected";
 
 export type ScreeningErrorRates = Partial<Record<
@@ -49,6 +57,11 @@ export type AssessmentResult = Record<string, unknown> & {
   pd_high_threshold?: number;
   screening_error_rates?: ScreeningErrorRates | null;
   prediction_mae?: number;
+  screening_basis?: "voice" | "voice_gait";
+  voice_screening?: ScreeningPart;
+  gait_screening?: ScreeningPart;
+  gait_features?: Record<string, number>;
+  gait_screening_unavailable_reason?: string;
   screening_unavailable_reason?: string;
   is_diagnostic?: boolean;
   notice?: string;
